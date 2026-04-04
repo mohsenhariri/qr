@@ -36,7 +36,7 @@ const PRESETS: Record<string, string> = {
     "URL:https://vectorqr.example",
     "END:VCARD",
   ].join("\n"),
-  url: "https://example.com/studio-launch?source=qr",
+  url: "https://mohsenhariri.github.io/qr",
   wifi: "WIFI:T:WPA;S:Studio Guest;P:design-lab-2026;;",
 };
 

@@ -2,6 +2,9 @@
 name = "qr-engine"
 version = "0.1.0"
 edition = "2021"
+description = "WebAssembly QR matrix generator for Vector QR Studio."
+license = "ISC"
+repository = "https://github.com/mohsenhariri/qr"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -10,3 +13,6 @@ crate-type = ["cdylib", "rlib"]
 console_error_panic_hook = "0.1.7"
 qrcodegen = "1.8.0"
 wasm-bindgen = "0.2.100"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
