@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <meta
+      name="description"
+      content="Generate sharp QR codes entirely in the browser with a Rust WebAssembly engine."
+    />
+    <title>Vector QR Studio</title>
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Static by design</p>
+          <h1>Vector QR Studio</h1>
+          <p class="lede">
+            A fully client-side QR code generator with a Rust WebAssembly core,
+            live preview, and crisp exports for print or screen.
+          </p>
+          <div class="feature-strip">
+            <span>No server round-trips</span>
+            <span>SVG + PNG export</span>
+            <span>Privacy-first rendering</span>
+          </div>
+          <div class="preset-row" aria-label="Preset payloads">
+            <button class="preset-button" data-preset="url" type="button">URL</button>
+            <button class="preset-button" data-preset="wifi" type="button">Wi-Fi</button>
+            <button class="preset-button" data-preset="contact" type="button">Contact</button>
+          </div>
+        </div>
+
+        <aside class="preview-panel">
+          <div class="preview-header">
+            <div>
+              <p class="panel-label">Live output</p>
+              <h2>Rendered in WebAssembly</h2>
+            </div>
+            <span class="status-pill" id="engine-status">Loading engine</span>
+          </div>
+
+          <div class="preview-stage" id="preview-shell">
+            <div class="preview-frame" id="qr-preview" aria-live="polite">
+              <p class="placeholder-copy">Preparing the renderer...</p>
+            </div>
+          </div>
+
+          <dl class="stat-grid">
+            <div>
+              <dt>Characters</dt>
+              <dd id="stat-length">0</dd>
+            </div>
+            <div>
+              <dt>Version</dt>
+              <dd id="stat-version">-</dd>
+            </div>
+            <div>
+              <dt>Matrix</dt>
+              <dd id="stat-size">-</dd>
+            </div>
+            <div>
+              <dt>Dark modules</dt>
+              <dd id="stat-dark">-</dd>
+            </div>
+          </dl>
+
+          <div class="action-row">
+            <button class="action-button primary" id="download-svg" type="button">
+              Download SVG
+            </button>
+            <button class="action-button secondary" id="download-png" type="button">
+              Download PNG
+            </button>
+          </div>
+        </aside>
+      </section>
+
+      <section class="workspace">
+        <div class="panel copy-panel">
+          <div class="panel-heading">
+            <p class="panel-label">Payload</p>
+            <h2>What should the code say?</h2>
+          </div>
+          <label class="sr-only" for="content-input">QR content</label>
+          <textarea
+            id="content-input"
+            name="content"
+            rows="8"
+            spellcheck="false"
+            placeholder="Paste a URL, Wi-Fi string, or any text you want to encode."
+          ></textarea>
+          <p class="panel-note">
+            Generation happens locally in your browser. Nothing is sent to a backend.
+          </p>
+        </div>
+
+        <div class="panel controls-panel">
+          <div class="panel-heading">
+            <p class="panel-label">Styling</p>
+            <h2>Dial in the output</h2>
+          </div>
+
+          <div class="control-grid">
+            <label class="field">
+              <span>Error correction</span>
+              <select id="ecc-select" name="ecc">
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+                <option value="quartile">Quartile</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Quiet zone</span>
+              <input id="border-range" name="border" type="range" min="1" max="8" value="4" />
+              <output id="border-value" for="border-range">4 modules</output>
+            </label>
+
+            <label class="field">
+              <span>Pixel density</span>
+              <input id="scale-range" name="scale" type="range" min="6" max="20" value="12" />
+              <output id="scale-value" for="scale-range">12 px/module</output>
+            </label>
+
+            <label class="field color-field">
+              <span>Foreground</span>
+              <input id="foreground-input" name="foreground" type="color" value="#103529" />
+            </label>
+
+            <label class="field color-field">
+              <span>Background</span>
+              <input id="background-input" name="background" type="color" value="#f7f1e6" />
+            </label>
+
+            <label class="field">
+              <span>Center logo</span>
+              <input
+                id="logo-input"
+                name="logo"
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              />
+              <p class="field-note">
+                Optional. The image stays local, is centered in the QR code, and switches error correction to High.
+              </p>
+            </label>
+
+            <div class="logo-card" id="logo-preview-shell" data-empty="true">
+              <img
+                class="logo-preview-image"
+                id="logo-preview-image"
+                alt="Selected logo preview"
+                hidden
+              />
+              <div class="logo-copy">
+                <p class="logo-status" id="logo-status">No logo selected.</p>
+                <p class="field-note">
+                  Use a simple mark with strong contrast. The logo area is intentionally conservative for scan tolerance.
+                </p>
+              </div>
+              <button
+                class="action-button secondary inline-action"
+                id="clear-logo"
+                type="button"
+                disabled
+              >
+                Remove logo
+              </button>
+            </div>
+
+            <label class="toggle-field" for="transparent-toggle">
+              <input id="transparent-toggle" name="transparent" type="checkbox" />
+              <span>Transparent background</span>
+            </label>
+          </div>
+
+          <p class="error-copy" id="error-copy" role="alert"></p>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

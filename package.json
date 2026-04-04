@@ -1,0 +1,27 @@
+{
+  "name": "vector-qr-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A fully static QR code generator powered by Rust WebAssembly and Vite.",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run wasm:dev && vite",
+    "build": "npm run wasm && vite build",
+    "preview": "vite preview",
+    "check": "npm run wasm:dev && tsc --noEmit",
+    "wasm": "wasm-pack build wasm/qr-engine --target web --out-dir ../../src/wasm/pkg --release",
+    "wasm:dev": "wasm-pack build wasm/qr-engine --target web --out-dir ../../src/wasm/pkg --dev"
+  },
+  "keywords": [
+    "qr-code",
+    "wasm",
+    "vite",
+    "rust"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vite": "^7.1.7"
+  }
+}

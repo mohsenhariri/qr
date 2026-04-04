@@ -1,0 +1,4 @@
+node_modules
+dist
+src/wasm/pkg
+wasm/qr-engine/target
