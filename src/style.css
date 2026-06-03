@@ -550,6 +550,17 @@ input[type="file"]::file-selector-button {
   box-shadow: 0 12px 32px rgba(0,0,0,0.4);
 }
 
+.preview-frame .qr-logo-layer {
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+
+html[data-logo-padding-drag="true"],
+html[data-logo-padding-drag="true"] * {
+  cursor: move !important;
+}
+
 .loading-state {
   display: flex;
   flex-direction: column;

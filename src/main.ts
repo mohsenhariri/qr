@@ -11,6 +11,9 @@ type AppState = {
   foreground: string;
   logoDataUrl: string | null;
   logoName: string | null;
+  logoPaddingX: number;
+  logoPaddingY: number;
+  logoSize: number;
   scale: number;
   transparent: boolean;
 };
@@ -22,6 +25,19 @@ type QrResult = {
   svg: string;
   version: number;
 };
+
+type LogoPaddingDrag = {
+  matrixPixelHeight: number;
+  matrixPixelWidth: number;
+  startPaddingX: number;
+  startPaddingY: number;
+  startX: number;
+  startY: number;
+};
+
+const LOGO_PADDING_MAX = 8;
+const LOGO_PADDING_MIN = 0;
+const LOGO_PADDING_STEP = 0.5;
 
 const PRESETS: Record<string, string> = {
   contact: [
@@ -48,6 +64,9 @@ const DEFAULT_STATE: AppState = {
   foreground: "#103529",
   logoDataUrl: null,
   logoName: null,
+  logoPaddingX: 3.5,
+  logoPaddingY: 3.5,
+  logoSize: 11,
   scale: 12,
   transparent: false,
 };
@@ -75,8 +94,26 @@ const elements = {
   errorCopy: getElement<HTMLElement>("#error-copy", "error message"),
   foregroundInput: getElement<HTMLInputElement>("#foreground-input", "foreground input"),
   logoInput: getElement<HTMLInputElement>("#logo-input", "logo input"),
+  logoPaddingXRange: getElement<HTMLInputElement>(
+    "#logo-padding-x-range",
+    "logo padding width range",
+  ),
+  logoPaddingXValue: getElement<HTMLOutputElement>(
+    "#logo-padding-x-value",
+    "logo padding width value",
+  ),
+  logoPaddingYRange: getElement<HTMLInputElement>(
+    "#logo-padding-y-range",
+    "logo padding height range",
+  ),
+  logoPaddingYValue: getElement<HTMLOutputElement>(
+    "#logo-padding-y-value",
+    "logo padding height value",
+  ),
   logoPreviewImage: getElement<HTMLImageElement>("#logo-preview-image", "logo preview image"),
   logoPreviewShell: getElement<HTMLElement>("#logo-preview-shell", "logo preview shell"),
+  logoSizeRange: getElement<HTMLInputElement>("#logo-size-range", "logo size range"),
+  logoSizeValue: getElement<HTMLOutputElement>("#logo-size-value", "logo size value"),
   logoStatus: getElement<HTMLElement>("#logo-status", "logo status"),
   preview: getElement<HTMLElement>("#qr-preview", "preview"),
   previewShell: getElement<HTMLElement>("#preview-shell", "preview shell"),
@@ -92,6 +129,7 @@ const elements = {
 
 let appState: AppState = { ...DEFAULT_STATE };
 let lastResult: QrResult | null = null;
+let logoPaddingDrag: LogoPaddingDrag | null = null;
 let pendingFrame = 0;
 
 async function bootstrap() {
@@ -175,6 +213,23 @@ function bindEvents() {
       showError("The selected logo could not be read in the browser.");
       clearLogo();
     }
+  });
+
+  elements.logoSizeRange.addEventListener("input", () => {
+    appState.logoSize = Number(elements.logoSizeRange.value);
+    elements.logoSizeValue.textContent = formatPercent(appState.logoSize);
+    syncLogoUi();
+    scheduleRender();
+  });
+
+  elements.logoPaddingXRange.addEventListener("input", () => {
+    setLogoPadding({ x: Number(elements.logoPaddingXRange.value) });
+    scheduleRender();
+  });
+
+  elements.logoPaddingYRange.addEventListener("input", () => {
+    setLogoPadding({ y: Number(elements.logoPaddingYRange.value) });
+    scheduleRender();
   });
 
   elements.backgroundInput.addEventListener("input", () => {
@@ -267,6 +322,7 @@ function render() {
     showError("");
     setDownloadsEnabled(true);
     elements.preview.innerHTML = svg;
+    bindLogoPreviewEditor();
     elements.previewShell.dataset.ready = "true";
     elements.statVersion.textContent = String(version);
     elements.statSize.textContent = `${size} × ${size}`;
@@ -360,11 +416,17 @@ function hydrateControls(state: AppState) {
   elements.contentInput.value = state.content;
   elements.eccSelect.value = state.errorCorrection;
   elements.borderRange.value = String(state.border);
+  elements.logoPaddingXRange.value = String(state.logoPaddingX);
+  elements.logoPaddingYRange.value = String(state.logoPaddingY);
+  elements.logoSizeRange.value = String(state.logoSize);
   elements.scaleRange.value = String(state.scale);
   elements.foregroundInput.value = state.foreground;
   elements.backgroundInput.value = state.background;
   elements.transparentToggle.checked = state.transparent;
   elements.borderValue.textContent = `${state.border} modules`;
+  elements.logoPaddingXValue.textContent = formatPercent(state.logoPaddingX);
+  elements.logoPaddingYValue.textContent = formatPercent(state.logoPaddingY);
+  elements.logoSizeValue.textContent = formatPercent(state.logoSize);
   elements.scaleValue.textContent = `${state.scale} px/module`;
   syncLogoUi();
   updateLengthStat(state.content);
@@ -396,7 +458,7 @@ function syncLogoUi() {
   elements.logoPreviewImage.hidden = !hasLogo;
   elements.logoPreviewImage.src = appState.logoDataUrl ?? "";
   elements.logoStatus.textContent = hasLogo
-    ? `${appState.logoName ?? "Logo"} is centered with High error correction locked for scan reliability.`
+    ? `${appState.logoName ?? "Logo"} is centered at ${formatPercent(appState.logoSize)} with ${formatPercent(appState.logoPaddingX)} × ${formatPercent(appState.logoPaddingY)} padding.`
     : "No logo selected.";
 }
 
@@ -427,13 +489,87 @@ function buildLogoSvg(matrixSize: number, state: AppState): string {
     return "";
   }
 
-  const layout = getLogoLayout(matrixSize, state.border, 1);
+  const layout = getLogoLayout(
+    matrixSize,
+    state.border,
+    1,
+    state.logoSize,
+    state.logoPaddingX,
+    state.logoPaddingY,
+  );
   const patchFill = state.transparent ? "#ffffff" : state.background;
 
   return [
-    `<rect x="${layout.boxX}" y="${layout.boxY}" width="${layout.boxSize}" height="${layout.boxSize}" rx="${layout.cornerRadius}" fill="${patchFill}" />`,
+    `<g class="qr-logo-layer" data-logo-editor="padding">`,
+    `<rect x="${layout.boxX}" y="${layout.boxY}" width="${layout.boxWidth}" height="${layout.boxHeight}" rx="${layout.cornerRadius}" fill="${patchFill}" />`,
     `<image href="${state.logoDataUrl}" x="${layout.imageX}" y="${layout.imageY}" width="${layout.imageSize}" height="${layout.imageSize}" preserveAspectRatio="xMidYMid meet" />`,
+    `</g>`,
   ].join("");
+}
+
+function bindLogoPreviewEditor() {
+  const svg = elements.preview.querySelector<SVGSVGElement>("svg");
+  const logoLayer = elements.preview.querySelector<SVGGElement>("[data-logo-editor='padding']");
+  const renderedResult = lastResult;
+
+  if (!svg || !logoLayer || !renderedResult) {
+    return;
+  }
+
+  logoLayer.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    const svgBounds = svg.getBoundingClientRect();
+    const totalSize = renderedResult.size + appState.border * 2;
+    const matrixPixelWidth = svgBounds.width * (renderedResult.size / totalSize);
+    const matrixPixelHeight = svgBounds.height * (renderedResult.size / totalSize);
+
+    if (matrixPixelWidth <= 0 || matrixPixelHeight <= 0) {
+      return;
+    }
+
+    event.preventDefault();
+    logoPaddingDrag = {
+      matrixPixelHeight,
+      matrixPixelWidth,
+      startPaddingX: appState.logoPaddingX,
+      startPaddingY: appState.logoPaddingY,
+      startX: event.clientX,
+      startY: event.clientY,
+    };
+    document.documentElement.dataset.logoPaddingDrag = "true";
+
+    document.addEventListener("pointermove", handleLogoPaddingDrag);
+    document.addEventListener("pointerup", stopLogoPaddingDrag, { once: true });
+    document.addEventListener("pointercancel", stopLogoPaddingDrag, { once: true });
+  });
+}
+
+function handleLogoPaddingDrag(event: PointerEvent) {
+  if (!logoPaddingDrag) {
+    return;
+  }
+
+  const deltaXPercent =
+    ((event.clientX - logoPaddingDrag.startX) / logoPaddingDrag.matrixPixelWidth) * 100;
+  const deltaYPercent =
+    ((event.clientY - logoPaddingDrag.startY) / logoPaddingDrag.matrixPixelHeight) * 100;
+
+  setLogoPadding({
+    x: logoPaddingDrag.startPaddingX + deltaXPercent,
+    y: logoPaddingDrag.startPaddingY + deltaYPercent,
+  });
+  scheduleRender();
+}
+
+function stopLogoPaddingDrag() {
+  logoPaddingDrag = null;
+  delete document.documentElement.dataset.logoPaddingDrag;
+  document.removeEventListener("pointermove", handleLogoPaddingDrag);
+  document.removeEventListener("pointerup", stopLogoPaddingDrag);
+  document.removeEventListener("pointercancel", stopLogoPaddingDrag);
 }
 
 async function drawLogoOnCanvas(
@@ -446,15 +582,22 @@ async function drawLogoOnCanvas(
   }
 
   const logo = await loadImage(state.logoDataUrl);
-  const layout = getLogoLayout(matrixSize, state.border, state.scale);
+  const layout = getLogoLayout(
+    matrixSize,
+    state.border,
+    state.scale,
+    state.logoSize,
+    state.logoPaddingX,
+    state.logoPaddingY,
+  );
 
   context.fillStyle = state.transparent ? "#ffffff" : state.background;
   fillRoundedRect(
     context,
     layout.boxX,
     layout.boxY,
-    layout.boxSize,
-    layout.boxSize,
+    layout.boxWidth,
+    layout.boxHeight,
     layout.cornerRadius,
   );
 
@@ -502,25 +645,66 @@ function fillRoundedRect(
   context.fill();
 }
 
-function getLogoLayout(matrixSize: number, border: number, unit: number) {
+function getLogoLayout(
+  matrixSize: number,
+  border: number,
+  unit: number,
+  logoSize: number,
+  logoPaddingX: number,
+  logoPaddingY: number,
+) {
   const paddedQrSize = matrixSize * unit;
   const offset = border * unit;
-  const boxSize = paddedQrSize * 0.18;
-  const imageSize = paddedQrSize * 0.11;
-  const boxX = offset + (paddedQrSize - boxSize) / 2;
-  const boxY = offset + (paddedQrSize - boxSize) / 2;
+  const imageSize = paddedQrSize * (logoSize / 100);
+  const boxWidth = paddedQrSize * ((logoSize + logoPaddingX * 2) / 100);
+  const boxHeight = paddedQrSize * ((logoSize + logoPaddingY * 2) / 100);
+  const boxX = offset + (paddedQrSize - boxWidth) / 2;
+  const boxY = offset + (paddedQrSize - boxHeight) / 2;
   const imageX = offset + (paddedQrSize - imageSize) / 2;
   const imageY = offset + (paddedQrSize - imageSize) / 2;
 
   return {
-    boxSize,
+    boxHeight,
+    boxWidth,
     boxX,
     boxY,
-    cornerRadius: boxSize * 0.18,
+    cornerRadius: Math.min(boxWidth, boxHeight) * 0.18,
     imageSize,
     imageX,
     imageY,
   };
+}
+
+function formatPercent(value: number): string {
+  return `${Number.isInteger(value) ? value : value.toFixed(1)}%`;
+}
+
+function setLogoPadding(next: { x?: number; y?: number }) {
+  if (typeof next.x === "number") {
+    appState.logoPaddingX = normalizeLogoPadding(next.x);
+    elements.logoPaddingXRange.value = String(appState.logoPaddingX);
+    elements.logoPaddingXValue.textContent = formatPercent(appState.logoPaddingX);
+  }
+
+  if (typeof next.y === "number") {
+    appState.logoPaddingY = normalizeLogoPadding(next.y);
+    elements.logoPaddingYRange.value = String(appState.logoPaddingY);
+    elements.logoPaddingYValue.textContent = formatPercent(appState.logoPaddingY);
+  }
+
+  syncLogoUi();
+}
+
+function normalizeLogoPadding(value: number): number {
+  return clamp(roundToStep(value, LOGO_PADDING_STEP), LOGO_PADDING_MIN, LOGO_PADDING_MAX);
+}
+
+function roundToStep(value: number, step: number): number {
+  return Math.round(value / step) * step;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
 
 function clearLogo() {

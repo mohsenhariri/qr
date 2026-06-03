@@ -147,6 +147,46 @@
                 />
               </div>
 
+              <label class="field range-field logo-size-field">
+                <div class="range-header">
+                  <span>Logo Size</span>
+                  <output id="logo-size-value" for="logo-size-range">11%</output>
+                </div>
+                <input id="logo-size-range" name="logo-size" type="range" min="6" max="20" value="11" />
+              </label>
+
+              <label class="field range-field logo-padding-field">
+                <div class="range-header">
+                  <span>Logo Border Width</span>
+                  <output id="logo-padding-x-value" for="logo-padding-x-range">3.5%</output>
+                </div>
+                <input
+                  id="logo-padding-x-range"
+                  name="logo-padding-x"
+                  type="range"
+                  min="0"
+                  max="8"
+                  step="0.5"
+                  value="3.5"
+                />
+              </label>
+
+              <label class="field range-field logo-padding-field">
+                <div class="range-header">
+                  <span>Logo Border Height</span>
+                  <output id="logo-padding-y-value" for="logo-padding-y-range">3.5%</output>
+                </div>
+                <input
+                  id="logo-padding-y-range"
+                  name="logo-padding-y"
+                  type="range"
+                  min="0"
+                  max="8"
+                  step="0.5"
+                  value="3.5"
+                />
+              </label>
+
               <div class="logo-card" id="logo-preview-shell" data-empty="true">
                 <img
                   class="logo-preview-image"
