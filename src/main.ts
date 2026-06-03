@@ -56,6 +56,9 @@ const PRESETS: Record<string, string> = {
   wifi: "WIFI:T:WPA;S:Studio Guest;P:design-lab-2026;;",
 };
 
+const CONTACT_EMAIL = "mxh1029@case.edu";
+const CAPTCHA_COLORS = ["#1a1a1a", "#2a2a2a", "#0a0a0a", "#333333"];
+
 const DEFAULT_STATE: AppState = {
   background: "#f7f1e6",
   border: 4,
@@ -85,13 +88,18 @@ const elements = {
   backgroundInput: getElement<HTMLInputElement>("#background-input", "background input"),
   borderRange: getElement<HTMLInputElement>("#border-range", "border range"),
   borderValue: getElement<HTMLOutputElement>("#border-value", "border value"),
+  captchaClose: getElement<HTMLButtonElement>("#captcha-close", "email modal close button"),
+  captchaText: getElement<HTMLElement>("#captcha-text", "captcha text"),
   clearLogo: getElement<HTMLButtonElement>("#clear-logo", "clear logo button"),
   contentInput: getElement<HTMLTextAreaElement>("#content-input", "content input"),
   downloadPng: getElement<HTMLButtonElement>("#download-png", "download PNG button"),
   downloadSvg: getElement<HTMLButtonElement>("#download-svg", "download SVG button"),
   eccSelect: getElement<HTMLSelectElement>("#ecc-select", "error correction select"),
+  emailModal: getElement<HTMLElement>("#email-modal", "email modal"),
+  emailRevealBtn: getElement<HTMLButtonElement>("#email-reveal-btn", "email reveal button"),
   engineStatus: getElement<HTMLElement>("#engine-status", "engine status"),
   errorCopy: getElement<HTMLElement>("#error-copy", "error message"),
+  footerYear: getElement<HTMLElement>("#footer-year", "footer year"),
   foregroundInput: getElement<HTMLInputElement>("#foreground-input", "foreground input"),
   logoInput: getElement<HTMLInputElement>("#logo-input", "logo input"),
   logoPaddingXRange: getElement<HTMLInputElement>(
@@ -115,9 +123,14 @@ const elements = {
   logoSizeRange: getElement<HTMLInputElement>("#logo-size-range", "logo size range"),
   logoSizeValue: getElement<HTMLOutputElement>("#logo-size-value", "logo size value"),
   logoStatus: getElement<HTMLElement>("#logo-status", "logo status"),
+  logoTuneFields: Array.from(
+    document.querySelectorAll<HTMLElement>(".logo-size-field, .logo-padding-field"),
+  ),
+  noiseCanvas: getElement<HTMLCanvasElement>("#noise-canvas", "captcha noise canvas"),
   preview: getElement<HTMLElement>("#qr-preview", "preview"),
   previewShell: getElement<HTMLElement>("#preview-shell", "preview shell"),
   presetButtons: Array.from(document.querySelectorAll<HTMLButtonElement>(".preset-button")),
+  refreshCaptcha: getElement<HTMLButtonElement>("#refresh-captcha", "refresh captcha button"),
   scaleRange: getElement<HTMLInputElement>("#scale-range", "scale range"),
   scaleValue: getElement<HTMLOutputElement>("#scale-value", "scale value"),
   statDark: getElement<HTMLElement>("#stat-dark", "dark modules stat"),
@@ -128,6 +141,7 @@ const elements = {
 };
 
 let appState: AppState = { ...DEFAULT_STATE };
+let lastFocusedElement: Element | null = null;
 let lastResult: QrResult | null = null;
 let logoPaddingDrag: LogoPaddingDrag | null = null;
 let pendingFrame = 0;
@@ -149,6 +163,8 @@ async function bootstrap() {
 }
 
 function bindEvents() {
+  bindFooterEvents();
+
   elements.contentInput.addEventListener("input", () => {
     appState.content = elements.contentInput.value;
     scheduleRender();
@@ -287,6 +303,142 @@ function bindEvents() {
       scheduleRender();
     });
   }
+}
+
+function bindFooterEvents() {
+  elements.footerYear.textContent = String(new Date().getFullYear());
+
+  elements.emailRevealBtn.addEventListener("click", () => {
+    openEmailModal();
+  });
+
+  elements.refreshCaptcha.addEventListener("click", () => {
+    generateCaptcha();
+  });
+
+  elements.captchaClose.addEventListener("click", () => {
+    closeEmailModal();
+  });
+
+  elements.emailModal.addEventListener("click", (event) => {
+    if (event.target === elements.emailModal) {
+      closeEmailModal();
+    }
+  });
+
+  elements.emailModal.addEventListener("keydown", handleEmailModalKeydown);
+}
+
+function openEmailModal() {
+  lastFocusedElement = document.activeElement;
+  elements.emailModal.hidden = false;
+  elements.emailModal.setAttribute("aria-hidden", "false");
+  document.body.style.overflow = "hidden";
+  generateCaptcha();
+
+  requestAnimationFrame(() => {
+    elements.captchaClose.focus();
+  });
+}
+
+function closeEmailModal() {
+  elements.emailModal.hidden = true;
+  elements.emailModal.setAttribute("aria-hidden", "true");
+  document.body.style.overflow = "";
+
+  if (lastFocusedElement instanceof HTMLElement) {
+    lastFocusedElement.focus();
+  }
+}
+
+function handleEmailModalKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeEmailModal();
+    return;
+  }
+
+  if (event.key !== "Tab") {
+    return;
+  }
+
+  const focusableElements = Array.from(
+    elements.emailModal.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((element) => !element.hidden && element.offsetParent !== null);
+
+  if (focusableElements.length === 0) {
+    event.preventDefault();
+    return;
+  }
+
+  const firstElement = focusableElements[0];
+  const lastElement = focusableElements[focusableElements.length - 1];
+
+  if (event.shiftKey && document.activeElement === firstElement) {
+    event.preventDefault();
+    lastElement.focus();
+  } else if (!event.shiftKey && document.activeElement === lastElement) {
+    event.preventDefault();
+    firstElement.focus();
+  }
+}
+
+function generateCaptcha() {
+  elements.captchaText.replaceChildren(
+    ...CONTACT_EMAIL.split("").map((character) => {
+      const span = document.createElement("span");
+      const rotate = randomBetween(-12.5, 12.5);
+      const skewX = randomBetween(-10, 10);
+      const skewY = randomBetween(-7.5, 7.5);
+      const scaleY = randomBetween(0.9, 1.2);
+      const translateY = randomBetween(-4, 4);
+      const fontSize = Math.round(randomBetween(30, 38));
+      const color = CAPTCHA_COLORS[Math.floor(Math.random() * CAPTCHA_COLORS.length)];
+
+      span.textContent = character;
+      span.style.color = color;
+      span.style.display = "inline-block";
+      span.style.fontFamily = "'Times New Roman', Georgia, serif";
+      span.style.fontSize = `${fontSize}px`;
+      span.style.fontWeight = "700";
+      span.style.letterSpacing = "1px";
+      span.style.margin = "0 1px";
+      span.style.textShadow =
+        "1px 1px 0 rgba(0,0,0,0.1), -1px -1px 0 rgba(255,255,255,0.3), 2px 2px 3px rgba(0,0,0,0.05)";
+      span.style.transform = `rotate(${rotate}deg) skewX(${skewX}deg) skewY(${skewY}deg) scaleY(${scaleY}) translateY(${translateY}px)`;
+
+      return span;
+    }),
+  );
+
+  generateNoise();
+}
+
+function generateNoise() {
+  const context = elements.noiseCanvas.getContext("2d");
+
+  if (!context) {
+    return;
+  }
+
+  const imageData = context.createImageData(elements.noiseCanvas.width, elements.noiseCanvas.height);
+  const data = imageData.data;
+
+  for (let index = 0; index < data.length; index += 4) {
+    const noise = Math.random() * 255;
+    data[index] = noise;
+    data[index + 1] = noise;
+    data[index + 2] = noise;
+    data[index + 3] = 255;
+  }
+
+  context.putImageData(imageData, 0, 0);
+}
+
+function randomBetween(min: number, max: number): number {
+  return min + Math.random() * (max - min);
 }
 
 function scheduleRender() {
@@ -455,6 +607,9 @@ function syncLogoUi() {
 
   elements.logoPreviewShell.dataset.empty = hasLogo ? "false" : "true";
   elements.clearLogo.disabled = !hasLogo;
+  for (const field of elements.logoTuneFields) {
+    field.hidden = !hasLogo;
+  }
   elements.logoPreviewImage.hidden = !hasLogo;
   elements.logoPreviewImage.src = appState.logoDataUrl ?? "";
   elements.logoStatus.textContent = hasLogo

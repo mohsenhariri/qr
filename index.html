@@ -157,7 +157,7 @@
 
               <label class="field range-field logo-padding-field">
                 <div class="range-header">
-                  <span>Logo Border Width</span>
+                  <span>Border Width</span>
                   <output id="logo-padding-x-value" for="logo-padding-x-range">3.5%</output>
                 </div>
                 <input
@@ -173,7 +173,7 @@
 
               <label class="field range-field logo-padding-field">
                 <div class="range-header">
-                  <span>Logo Border Height</span>
+                  <span>Border Height</span>
                   <output id="logo-padding-y-value" for="logo-padding-y-range">3.5%</output>
                 </div>
                 <input
@@ -272,6 +272,64 @@
         </aside>
       </section>
     </main>
+
+    <footer id="footer" class="site-footer" aria-label="Site links">
+      <div class="footer-inner">
+        <p class="footer-line">
+          If around,
+          <code class="footer-code"><a href="https://en.wikipedia.org/wiki/Finger_(protocol)" target="_blank" rel="noopener noreferrer">finger</a> -m mohsen</code>,
+          otherwise
+          <button id="email-reveal-btn" class="footer-link footer-button" type="button" aria-haspopup="dialog">email</button>
+          works best.
+        </p>
+        <p class="footer-line">
+          Copyright © <span id="footer-year">2026</span>
+          <a class="footer-link" href="https://github.com/mohsenhariri/qr/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>,
+          Source:
+          <a class="footer-link" href="https://github.com/mohsenhariri/qr" target="_blank" rel="noopener noreferrer">GitHub</a>,
+          <a class="footer-link" href="https://github.com/mohsenhariri/qr/pulls" target="_blank" rel="noopener noreferrer">Open a PR</a>.
+        </p>
+      </div>
+
+      <div
+        id="email-modal"
+        class="email-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-hidden="true"
+        aria-labelledby="email-modal-title"
+        aria-describedby="email-modal-desc"
+        tabindex="-1"
+        hidden
+      >
+        <div class="email-modal-panel">
+          <h2 id="email-modal-title" class="sr-only">Email verification challenge</h2>
+          <p id="email-modal-desc" class="sr-only">The email address is shown as a visual text challenge.</p>
+
+          <div class="captcha-shell" aria-live="polite">
+            <div class="captcha-image">
+              <canvas id="noise-canvas" width="640" height="96" aria-hidden="true"></canvas>
+              <div id="captcha-text" class="captcha-text"></div>
+              <div class="captcha-scanlines" aria-hidden="true"></div>
+            </div>
+            <div class="captcha-toolbar">
+              <button id="refresh-captcha" class="captcha-icon-button" type="button" aria-label="Get a new challenge" title="Get a new challenge">
+                <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                  <path d="M3 21v-5h5" />
+                  <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                  <path d="M16 8h5V3" />
+                </svg>
+              </button>
+              <a href="https://www.google.com/recaptcha" target="_blank" rel="noopener noreferrer">reCAPTCHA</a>
+            </div>
+          </div>
+
+          <button id="captcha-close" class="action-button secondary email-close-button" type="button">Close</button>
+        </div>
+      </div>
+    </footer>
+
     <script>
       (function() {
         const root = document.documentElement;
