@@ -3,7 +3,7 @@ name = "qr-engine"
 version = "0.1.0"
 edition = "2021"
 description = "WebAssembly QR matrix generator for Vector QR Studio."
-license = "ISC"
+license = "MIT"
 repository = "https://github.com/mohsenhariri/qr"
 
 [lib]

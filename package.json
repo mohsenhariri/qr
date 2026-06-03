@@ -19,7 +19,7 @@
     "rust"
   ],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "devDependencies": {
     "typescript": "^5.8.3",
     "vite": "^7.1.7"
