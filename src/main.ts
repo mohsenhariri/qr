@@ -2,6 +2,28 @@ import "./style.css";
 import init, { generate_qr } from "./wasm/pkg/qr_engine.js";
 
 type ErrorCorrection = "low" | "medium" | "quartile" | "high";
+type PayloadType = "contact" | "raw" | "url" | "wifi";
+type WifiEncryption = "WEP" | "WPA" | "nopass";
+
+type PayloadBuilders = {
+  contact: {
+    email: string;
+    fullName: string;
+    organization: string;
+    phone: string;
+    title: string;
+    url: string;
+  };
+  url: {
+    value: string;
+  };
+  wifi: {
+    encryption: WifiEncryption;
+    hidden: boolean;
+    password: string;
+    ssid: string;
+  };
+};
 
 type AppState = {
   background: string;
@@ -15,6 +37,8 @@ type AppState = {
   logoPaddingY: number;
   logoPresetId: string | null;
   logoSize: number;
+  payloadBuilders: PayloadBuilders;
+  payloadType: PayloadType;
   scale: number;
   transparent: boolean;
 };
@@ -42,29 +66,64 @@ type PresetLogo = {
   source: string;
 };
 
+type ScanSafetyStatus = "good" | "notice" | "warning";
+
+type ScanSafetyItem = {
+  detail: string;
+  label: string;
+  status: ScanSafetyStatus;
+};
+
+type ShareableSettings = {
+  background: string;
+  border: number;
+  content: string;
+  errorCorrection: ErrorCorrection;
+  foreground: string;
+  logoPaddingX: number;
+  logoPaddingY: number;
+  logoPresetId: string | null;
+  logoSize: number;
+  payloadBuilders: PayloadBuilders;
+  payloadType: PayloadType;
+  scale: number;
+  transparent: boolean;
+};
+
+type HistoryEntry = ShareableSettings & {
+  createdAt: number;
+  id: string;
+  label: string;
+};
+
 const LOGO_PADDING_MAX = 8;
 const LOGO_PADDING_MIN = 0;
 const LOGO_PADDING_STEP = 0.5;
 
-const PRESETS: Record<string, string> = {
-  contact: [
-    "BEGIN:VCARD",
-    "VERSION:3.0",
-    "N:Rivera;Avery;;;",
-    "FN:Avery Rivera",
-    "ORG:Vector QR Studio",
-    "TITLE:Creative Technologist",
-    "TEL:+1-555-010-2026",
-    "EMAIL:avery@vectorqr.example",
-    "URL:https://vectorqr.example",
-    "END:VCARD",
-  ].join("\n"),
-  url: "https://mohsenhariri.github.io/qr",
-  wifi: "WIFI:T:WPA;S:Studio Guest;P:design-lab-2026;;",
+const DEFAULT_PAYLOAD_BUILDERS: PayloadBuilders = {
+  contact: {
+    email: "avery@vectorqr.example",
+    fullName: "Avery Rivera",
+    organization: "Vector QR Studio",
+    phone: "+1-555-010-2026",
+    title: "Creative Technologist",
+    url: "https://vectorqr.example",
+  },
+  url: {
+    value: "https://mohsenhariri.github.io/qr",
+  },
+  wifi: {
+    encryption: "WPA",
+    hidden: false,
+    password: "design-lab-2026",
+    ssid: "Studio Guest",
+  },
 };
 
 const CONTACT_EMAIL = "mxh1029@case.edu";
 const CAPTCHA_COLORS = ["#1a1a1a", "#2a2a2a", "#0a0a0a", "#333333"];
+const HISTORY_KEY = "vector-qr-studio-history";
+const HISTORY_LIMIT = 6;
 
 const PRESET_LOGOS: PresetLogo[] = [
   {
@@ -103,7 +162,7 @@ const PRESET_LOGOS: PresetLogo[] = [
 const DEFAULT_STATE: AppState = {
   background: "#f7f1e6",
   border: 4,
-  content: PRESETS.url,
+  content: buildUrlPayload(DEFAULT_PAYLOAD_BUILDERS.url),
   errorCorrection: "medium",
   foreground: "#103529",
   logoDataUrl: null,
@@ -112,6 +171,8 @@ const DEFAULT_STATE: AppState = {
   logoPaddingY: 3.5,
   logoPresetId: null,
   logoSize: 11,
+  payloadBuilders: clonePayloadBuilders(DEFAULT_PAYLOAD_BUILDERS),
+  payloadType: "url",
   scale: 12,
   transparent: false,
 };
@@ -133,7 +194,23 @@ const elements = {
   captchaClose: getElement<HTMLButtonElement>("#captcha-close", "email modal close button"),
   captchaText: getElement<HTMLElement>("#captcha-text", "captcha text"),
   clearLogo: getElement<HTMLButtonElement>("#clear-logo", "clear logo button"),
+  clipboardStatus: getElement<HTMLElement>("#clipboard-status", "clipboard status"),
+  contactEmailInput: getElement<HTMLInputElement>("#contact-email-input", "contact email input"),
+  contactNameInput: getElement<HTMLInputElement>("#contact-name-input", "contact name input"),
+  contactOrgInput: getElement<HTMLInputElement>(
+    "#contact-org-input",
+    "contact organization input",
+  ),
+  contactPhoneInput: getElement<HTMLInputElement>("#contact-phone-input", "contact phone input"),
+  contactTitleInput: getElement<HTMLInputElement>("#contact-title-input", "contact title input"),
+  contactUrlInput: getElement<HTMLInputElement>("#contact-url-input", "contact URL input"),
   contentInput: getElement<HTMLTextAreaElement>("#content-input", "content input"),
+  copySettingsLink: getElement<HTMLButtonElement>(
+    "#copy-settings-link",
+    "copy settings link button",
+  ),
+  copyPng: getElement<HTMLButtonElement>("#copy-png", "copy PNG button"),
+  copySvg: getElement<HTMLButtonElement>("#copy-svg", "copy SVG button"),
   downloadPng: getElement<HTMLButtonElement>("#download-png", "download PNG button"),
   downloadSvg: getElement<HTMLButtonElement>("#download-svg", "download SVG button"),
   eccSelect: getElement<HTMLSelectElement>("#ecc-select", "error correction select"),
@@ -143,6 +220,10 @@ const elements = {
   errorCopy: getElement<HTMLElement>("#error-copy", "error message"),
   footerYear: getElement<HTMLElement>("#footer-year", "footer year"),
   foregroundInput: getElement<HTMLInputElement>("#foreground-input", "foreground input"),
+  historyClear: getElement<HTMLButtonElement>("#history-clear", "clear history button"),
+  historyCount: getElement<HTMLElement>("#history-count", "history count"),
+  historyEmpty: getElement<HTMLElement>("#history-empty", "empty history message"),
+  historyList: getElement<HTMLUListElement>("#history-list", "history list"),
   logoInput: getElement<HTMLInputElement>("#logo-input", "logo input"),
   logoPaddingXRange: getElement<HTMLInputElement>(
     "#logo-padding-x-range",
@@ -170,35 +251,56 @@ const elements = {
     document.querySelectorAll<HTMLElement>(".logo-size-field, .logo-padding-field"),
   ),
   noiseCanvas: getElement<HTMLCanvasElement>("#noise-canvas", "captcha noise canvas"),
+  payloadBuilder: getElement<HTMLElement>("#payload-builder", "payload builder"),
+  payloadBuilderSections: Array.from(document.querySelectorAll<HTMLElement>("[data-builder]")),
+  payloadTypeButtons: Array.from(
+    document.querySelectorAll<HTMLButtonElement>("[data-payload-type]"),
+  ),
+  payloadUrlInput: getElement<HTMLInputElement>("#payload-url-input", "payload URL input"),
   preview: getElement<HTMLElement>("#qr-preview", "preview"),
   previewShell: getElement<HTMLElement>("#preview-shell", "preview shell"),
-  presetButtons: Array.from(document.querySelectorAll<HTMLButtonElement>(".preset-button")),
   refreshCaptcha: getElement<HTMLButtonElement>("#refresh-captcha", "refresh captcha button"),
   scaleRange: getElement<HTMLInputElement>("#scale-range", "scale range"),
   scaleValue: getElement<HTMLOutputElement>("#scale-value", "scale value"),
+  scanCheckList: getElement<HTMLUListElement>("#scan-check-list", "scan safety checks"),
+  scanSafety: getElement<HTMLElement>("#scan-safety", "scan safety"),
+  scanSafetySummary: getElement<HTMLElement>("#scan-safety-summary", "scan safety summary"),
   statDark: getElement<HTMLElement>("#stat-dark", "dark modules stat"),
   statLength: getElement<HTMLElement>("#stat-length", "length stat"),
   statSize: getElement<HTMLElement>("#stat-size", "matrix size stat"),
   statVersion: getElement<HTMLElement>("#stat-version", "version stat"),
   transparentToggle: getElement<HTMLInputElement>("#transparent-toggle", "transparent toggle"),
+  wifiEncryptionSelect: getElement<HTMLSelectElement>(
+    "#wifi-encryption-select",
+    "Wi-Fi encryption select",
+  ),
+  wifiHiddenToggle: getElement<HTMLInputElement>("#wifi-hidden-toggle", "hidden Wi-Fi toggle"),
+  wifiPasswordInput: getElement<HTMLInputElement>("#wifi-password-input", "Wi-Fi password input"),
+  wifiSsidInput: getElement<HTMLInputElement>("#wifi-ssid-input", "Wi-Fi SSID input"),
 };
 
-let appState: AppState = { ...DEFAULT_STATE };
+let appState: AppState = createDefaultState();
+let historyEntries: HistoryEntry[] = [];
+let historySaveTimer = 0;
 let lastFocusedElement: Element | null = null;
 let lastResult: QrResult | null = null;
 let logoPaddingDrag: LogoPaddingDrag | null = null;
 let logoPresetLoadId = 0;
 let pendingFrame = 0;
+const buttonFeedbackTimers = new Map<HTMLButtonElement, number>();
 
 async function bootstrap() {
   renderPresetLogoButtons();
+  historyEntries = loadHistoryEntries();
+  renderHistoryList();
+  hydrateStateFromShareUrl();
   hydrateControls(appState);
   setDownloadsEnabled(false);
 
   try {
     await init();
     setEngineStatus("Engine ready", true);
-    scheduleRender();
+    renderLogoPresetOrQr();
   } catch (error) {
     setEngineStatus("Engine failed", false);
     showError(getErrorMessage(error));
@@ -209,9 +311,12 @@ async function bootstrap() {
 
 function bindEvents() {
   bindFooterEvents();
+  bindHistoryEvents();
 
   elements.contentInput.addEventListener("input", () => {
     appState.content = elements.contentInput.value;
+    appState.payloadType = "raw";
+    syncPayloadBuilderUi();
     scheduleRender();
   });
 
@@ -335,20 +440,122 @@ function bindEvents() {
     downloadBlob(blob, `${createFilename(appState.content)}.png`);
   });
 
-  for (const button of elements.presetButtons) {
-    button.addEventListener("click", () => {
-      const preset = button.dataset.preset ?? "";
-      const value = PRESETS[preset];
+  elements.copySvg.addEventListener("click", async () => {
+    if (!lastResult) {
+      return;
+    }
 
-      if (!value) {
+    try {
+      await copyTextToClipboard(lastResult.svg);
+      setClipboardFeedback(elements.copySvg, "Copied SVG");
+      showError("");
+    } catch {
+      showError("Unable to copy SVG in the current browser context.");
+    }
+  });
+
+  elements.copyPng.addEventListener("click", async () => {
+    if (!lastResult) {
+      return;
+    }
+
+    if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+      showError("PNG clipboard copy is not supported in this browser.");
+      return;
+    }
+
+    const blob = await renderPngBlob(lastResult);
+    if (!blob) {
+      showError("Unable to render PNG for clipboard copy.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      setClipboardFeedback(elements.copyPng, "Copied PNG");
+      showError("");
+    } catch {
+      showError("Unable to copy PNG in the current browser context.");
+    }
+  });
+
+  elements.copySettingsLink.addEventListener("click", async () => {
+    try {
+      await copyTextToClipboard(buildShareUrl());
+      setIconButtonFeedback(elements.copySettingsLink, "Settings link copied");
+      showError("");
+    } catch {
+      showError("Unable to copy the settings link in the current browser context.");
+    }
+  });
+
+  for (const button of elements.payloadTypeButtons) {
+    button.addEventListener("click", () => {
+      const payloadType = button.dataset.payloadType as PayloadType | undefined;
+
+      if (!payloadType) {
         return;
       }
 
-      appState.content = value;
-      elements.contentInput.value = value;
+      appState.payloadType = payloadType;
+      if (payloadType !== "raw") {
+        syncContentFromPayloadBuilder();
+      }
+
+      syncPayloadBuilderUi();
       scheduleRender();
     });
   }
+
+  bindPayloadBuilderEvents();
+}
+
+function bindHistoryEvents() {
+  elements.historyList.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-history-id]");
+
+    if (!button) {
+      return;
+    }
+
+    const entry = historyEntries.find((item) => item.id === button.dataset.historyId);
+    if (!entry) {
+      return;
+    }
+
+    restoreShareableSettings(entry);
+  });
+
+  elements.historyClear.addEventListener("click", () => {
+    historyEntries = [];
+    persistHistoryEntries();
+    renderHistoryList();
+  });
+}
+
+function bindPayloadBuilderEvents() {
+  const syncFromActiveBuilder = () => {
+    updatePayloadBuilderFromControls(appState.payloadType);
+    syncContentFromPayloadBuilder();
+    scheduleRender();
+  };
+
+  for (const input of [
+    elements.payloadUrlInput,
+    elements.wifiSsidInput,
+    elements.wifiPasswordInput,
+    elements.contactNameInput,
+    elements.contactOrgInput,
+    elements.contactTitleInput,
+    elements.contactPhoneInput,
+    elements.contactEmailInput,
+    elements.contactUrlInput,
+  ]) {
+    input.addEventListener("input", syncFromActiveBuilder);
+  }
+
+  elements.wifiEncryptionSelect.addEventListener("change", syncFromActiveBuilder);
+  elements.wifiHiddenToggle.addEventListener("change", syncFromActiveBuilder);
 }
 
 function renderPresetLogoButtons() {
@@ -409,6 +616,12 @@ async function selectPresetLogo(logo: PresetLogo) {
     showError("");
     scheduleRender();
   } catch {
+    if (requestId === logoPresetLoadId && !appState.logoDataUrl) {
+      appState.logoPresetId = null;
+      syncLogoUi();
+    }
+
+    scheduleRender();
     showError(`The ${logo.label} logo could not be loaded.`);
   }
 }
@@ -587,6 +800,8 @@ function render() {
     elements.statVersion.textContent = String(version);
     elements.statSize.textContent = `${size} × ${size}`;
     elements.statDark.textContent = darkModules.toLocaleString();
+    updateScanSafety(lastResult);
+    queueHistorySave();
   } catch (error) {
     lastResult = null;
     elements.previewShell.dataset.ready = "false";
@@ -594,6 +809,7 @@ function render() {
     elements.statVersion.textContent = "-";
     elements.statSize.textContent = "-";
     elements.statDark.textContent = "-";
+    updateScanSafety(null);
     setDownloadsEnabled(false);
     showError(getErrorMessage(error));
   }
@@ -674,6 +890,7 @@ async function renderPngBlob(result: QrResult): Promise<Blob | null> {
 
 function hydrateControls(state: AppState) {
   elements.contentInput.value = state.content;
+  hydratePayloadBuilderControls(state.payloadBuilders);
   elements.eccSelect.value = state.errorCorrection;
   elements.borderRange.value = String(state.border);
   elements.logoPaddingXRange.value = String(state.logoPaddingX);
@@ -688,6 +905,7 @@ function hydrateControls(state: AppState) {
   elements.logoPaddingYValue.textContent = formatPercent(state.logoPaddingY);
   elements.logoSizeValue.textContent = formatPercent(state.logoSize);
   elements.scaleValue.textContent = `${state.scale} px/module`;
+  syncPayloadBuilderUi();
   syncLogoUi();
   updateLengthStat(state.content);
 }
@@ -700,6 +918,8 @@ function setEngineStatus(message: string, ready: boolean) {
 function setDownloadsEnabled(enabled: boolean) {
   elements.downloadSvg.disabled = !enabled;
   elements.downloadPng.disabled = !enabled;
+  elements.copySvg.disabled = !enabled;
+  elements.copyPng.disabled = !enabled;
 }
 
 function showError(message: string) {
@@ -708,6 +928,831 @@ function showError(message: string) {
 
 function updateLengthStat(content: string) {
   elements.statLength.textContent = String(content.trim().length);
+}
+
+function hydratePayloadBuilderControls(builders: PayloadBuilders) {
+  elements.payloadUrlInput.value = builders.url.value;
+  elements.wifiSsidInput.value = builders.wifi.ssid;
+  elements.wifiPasswordInput.value = builders.wifi.password;
+  elements.wifiEncryptionSelect.value = builders.wifi.encryption;
+  elements.wifiHiddenToggle.checked = builders.wifi.hidden;
+  elements.contactNameInput.value = builders.contact.fullName;
+  elements.contactOrgInput.value = builders.contact.organization;
+  elements.contactTitleInput.value = builders.contact.title;
+  elements.contactPhoneInput.value = builders.contact.phone;
+  elements.contactEmailInput.value = builders.contact.email;
+  elements.contactUrlInput.value = builders.contact.url;
+}
+
+function syncPayloadBuilderUi() {
+  const isRaw = appState.payloadType === "raw";
+
+  elements.payloadBuilder.hidden = isRaw;
+  for (const button of elements.payloadTypeButtons) {
+    button.setAttribute(
+      "aria-pressed",
+      button.dataset.payloadType === appState.payloadType ? "true" : "false",
+    );
+  }
+
+  for (const section of elements.payloadBuilderSections) {
+    section.hidden = isRaw || section.dataset.builder !== appState.payloadType;
+  }
+}
+
+function updatePayloadBuilderFromControls(type: PayloadType) {
+  if (type === "url") {
+    appState.payloadBuilders.url.value = elements.payloadUrlInput.value;
+    return;
+  }
+
+  if (type === "wifi") {
+    appState.payloadBuilders.wifi.ssid = elements.wifiSsidInput.value;
+    appState.payloadBuilders.wifi.password = elements.wifiPasswordInput.value;
+    appState.payloadBuilders.wifi.encryption = elements.wifiEncryptionSelect.value as WifiEncryption;
+    appState.payloadBuilders.wifi.hidden = elements.wifiHiddenToggle.checked;
+    return;
+  }
+
+  if (type === "contact") {
+    appState.payloadBuilders.contact.fullName = elements.contactNameInput.value;
+    appState.payloadBuilders.contact.organization = elements.contactOrgInput.value;
+    appState.payloadBuilders.contact.title = elements.contactTitleInput.value;
+    appState.payloadBuilders.contact.phone = elements.contactPhoneInput.value;
+    appState.payloadBuilders.contact.email = elements.contactEmailInput.value;
+    appState.payloadBuilders.contact.url = elements.contactUrlInput.value;
+  }
+}
+
+function syncContentFromPayloadBuilder() {
+  const content = buildPayloadFromBuilder(appState.payloadType, appState.payloadBuilders);
+
+  if (content === null) {
+    return;
+  }
+
+  appState.content = content;
+  elements.contentInput.value = content;
+}
+
+function buildPayloadFromBuilder(
+  type: PayloadType,
+  builders: PayloadBuilders,
+): string | null {
+  if (type === "url") {
+    return buildUrlPayload(builders.url);
+  }
+
+  if (type === "wifi") {
+    return buildWifiPayload(builders.wifi);
+  }
+
+  if (type === "contact") {
+    return buildVCardPayload(builders.contact);
+  }
+
+  return null;
+}
+
+function buildUrlPayload(builder: PayloadBuilders["url"]): string {
+  return normalizeUrl(builder.value);
+}
+
+function buildWifiPayload(builder: PayloadBuilders["wifi"]): string {
+  const security = builder.encryption;
+  const parts = [`WIFI:T:${security}`, `S:${escapeWifiValue(builder.ssid)}`];
+
+  if (security !== "nopass") {
+    parts.push(`P:${escapeWifiValue(builder.password)}`);
+  }
+
+  if (builder.hidden) {
+    parts.push("H:true");
+  }
+
+  return `${parts.join(";")};;`;
+}
+
+function buildVCardPayload(builder: PayloadBuilders["contact"]): string {
+  const fullName = builder.fullName.trim() || "Contact";
+  const { firstName, lastName } = splitFullName(fullName);
+  const lines = [
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    `N:${escapeVCardValue(lastName)};${escapeVCardValue(firstName)};;;`,
+    `FN:${escapeVCardValue(fullName)}`,
+  ];
+
+  if (builder.organization.trim()) {
+    lines.push(`ORG:${escapeVCardValue(builder.organization.trim())}`);
+  }
+
+  if (builder.title.trim()) {
+    lines.push(`TITLE:${escapeVCardValue(builder.title.trim())}`);
+  }
+
+  if (builder.phone.trim()) {
+    lines.push(`TEL:${escapeVCardValue(builder.phone.trim())}`);
+  }
+
+  if (builder.email.trim()) {
+    lines.push(`EMAIL:${escapeVCardValue(builder.email.trim())}`);
+  }
+
+  if (builder.url.trim()) {
+    lines.push(`URL:${escapeVCardValue(normalizeUrl(builder.url))}`);
+  }
+
+  lines.push("END:VCARD");
+
+  return lines.join("\n");
+}
+
+function normalizeUrl(value: string): string {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return "";
+  }
+
+  return /^[a-z][a-z0-9+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function escapeWifiValue(value: string): string {
+  return value.replace(/([\\;,:"])/g, "\\$1");
+}
+
+function escapeVCardValue(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\n/g, "\\n")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,");
+}
+
+function splitFullName(fullName: string): { firstName: string; lastName: string } {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+
+  if (parts.length <= 1) {
+    return { firstName: parts[0] ?? fullName, lastName: "" };
+  }
+
+  return {
+    firstName: parts.slice(0, -1).join(" "),
+    lastName: parts[parts.length - 1],
+  };
+}
+
+function clonePayloadBuilders(builders: PayloadBuilders): PayloadBuilders {
+  return {
+    contact: { ...builders.contact },
+    url: { ...builders.url },
+    wifi: { ...builders.wifi },
+  };
+}
+
+function createDefaultState(): AppState {
+  return {
+    ...DEFAULT_STATE,
+    payloadBuilders: clonePayloadBuilders(DEFAULT_STATE.payloadBuilders),
+  };
+}
+
+function hydrateStateFromShareUrl() {
+  const settings = readShareableSettings();
+
+  if (!settings) {
+    return;
+  }
+
+  applyShareableSettings(settings);
+}
+
+function restoreShareableSettings(settings: ShareableSettings) {
+  applyShareableSettings(settings);
+  hydrateControls(appState);
+  renderLogoPresetOrQr();
+}
+
+function applyShareableSettings(settings: ShareableSettings) {
+  appState = {
+    ...appState,
+    background: settings.background,
+    border: settings.border,
+    content:
+      settings.payloadType === "raw"
+        ? settings.content
+        : buildPayloadFromBuilder(settings.payloadType, settings.payloadBuilders) ?? settings.content,
+    errorCorrection: settings.errorCorrection,
+    foreground: settings.foreground,
+    logoDataUrl: null,
+    logoName: null,
+    logoPaddingX: settings.logoPaddingX,
+    logoPaddingY: settings.logoPaddingY,
+    logoPresetId: getPresetLogo(settings.logoPresetId)?.id ?? null,
+    logoSize: settings.logoSize,
+    payloadBuilders: clonePayloadBuilders(settings.payloadBuilders),
+    payloadType: settings.payloadType,
+    scale: settings.scale,
+    transparent: settings.transparent,
+  };
+}
+
+function renderLogoPresetOrQr() {
+  const sharedLogo = getPresetLogo(appState.logoPresetId);
+
+  if (sharedLogo) {
+    void selectPresetLogo(sharedLogo);
+  } else {
+    scheduleRender();
+  }
+}
+
+function readShareableSettings(): ShareableSettings | null {
+  const hash = window.location.hash.replace(/^#/, "");
+
+  if (!hash.startsWith("s=")) {
+    return null;
+  }
+
+  try {
+    const decoded = JSON.parse(decodeBase64Url(hash.slice(2))) as unknown;
+
+    if (!isRecord(decoded)) {
+      return null;
+    }
+
+    const payloadBuilders = readPayloadBuilders(decoded.payloadBuilders);
+    const payloadType = readPayloadType(decoded.payloadType, "raw");
+
+    return {
+      background: readHexColor(decoded.background, DEFAULT_STATE.background),
+      border: readNumber(decoded.border, DEFAULT_STATE.border, 1, 8),
+      content: readString(decoded.content, DEFAULT_STATE.content),
+      errorCorrection: readErrorCorrection(decoded.errorCorrection, DEFAULT_STATE.errorCorrection),
+      foreground: readHexColor(decoded.foreground, DEFAULT_STATE.foreground),
+      logoPaddingX: readNumber(
+        decoded.logoPaddingX,
+        DEFAULT_STATE.logoPaddingX,
+        LOGO_PADDING_MIN,
+        LOGO_PADDING_MAX,
+      ),
+      logoPaddingY: readNumber(
+        decoded.logoPaddingY,
+        DEFAULT_STATE.logoPaddingY,
+        LOGO_PADDING_MIN,
+        LOGO_PADDING_MAX,
+      ),
+      logoPresetId: readNullableString(decoded.logoPresetId),
+      logoSize: readNumber(decoded.logoSize, DEFAULT_STATE.logoSize, 6, 20),
+      payloadBuilders,
+      payloadType,
+      scale: readNumber(decoded.scale, DEFAULT_STATE.scale, 6, 20),
+      transparent: readBoolean(decoded.transparent, DEFAULT_STATE.transparent),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function buildShareUrl(): string {
+  const url = new URL(window.location.href);
+
+  url.hash = `s=${encodeBase64Url(JSON.stringify(toShareableSettings()))}`;
+
+  return url.toString();
+}
+
+function toShareableSettings(): ShareableSettings {
+  return {
+    background: appState.background,
+    border: appState.border,
+    content: appState.content,
+    errorCorrection: appState.errorCorrection,
+    foreground: appState.foreground,
+    logoPaddingX: appState.logoPaddingX,
+    logoPaddingY: appState.logoPaddingY,
+    logoPresetId: appState.logoPresetId,
+    logoSize: appState.logoSize,
+    payloadBuilders: clonePayloadBuilders(appState.payloadBuilders),
+    payloadType: appState.payloadType,
+    scale: appState.scale,
+    transparent: appState.transparent,
+  };
+}
+
+function getPresetLogo(id: string | null): PresetLogo | null {
+  if (!id) {
+    return null;
+  }
+
+  return PRESET_LOGOS.find((logo) => logo.id === id) ?? null;
+}
+
+function readPayloadBuilders(value: unknown): PayloadBuilders {
+  if (!isRecord(value)) {
+    return clonePayloadBuilders(DEFAULT_PAYLOAD_BUILDERS);
+  }
+
+  const url = isRecord(value.url) ? value.url : {};
+  const wifi = isRecord(value.wifi) ? value.wifi : {};
+  const contact = isRecord(value.contact) ? value.contact : {};
+
+  return {
+    contact: {
+      email: readString(contact.email, DEFAULT_PAYLOAD_BUILDERS.contact.email),
+      fullName: readString(contact.fullName, DEFAULT_PAYLOAD_BUILDERS.contact.fullName),
+      organization: readString(
+        contact.organization,
+        DEFAULT_PAYLOAD_BUILDERS.contact.organization,
+      ),
+      phone: readString(contact.phone, DEFAULT_PAYLOAD_BUILDERS.contact.phone),
+      title: readString(contact.title, DEFAULT_PAYLOAD_BUILDERS.contact.title),
+      url: readString(contact.url, DEFAULT_PAYLOAD_BUILDERS.contact.url),
+    },
+    url: {
+      value: readString(url.value, DEFAULT_PAYLOAD_BUILDERS.url.value),
+    },
+    wifi: {
+      encryption: readWifiEncryption(wifi.encryption, DEFAULT_PAYLOAD_BUILDERS.wifi.encryption),
+      hidden: readBoolean(wifi.hidden, DEFAULT_PAYLOAD_BUILDERS.wifi.hidden),
+      password: readString(wifi.password, DEFAULT_PAYLOAD_BUILDERS.wifi.password),
+      ssid: readString(wifi.ssid, DEFAULT_PAYLOAD_BUILDERS.wifi.ssid),
+    },
+  };
+}
+
+function readPayloadType(value: unknown, fallback: PayloadType): PayloadType {
+  return value === "contact" || value === "raw" || value === "url" || value === "wifi"
+    ? value
+    : fallback;
+}
+
+function readErrorCorrection(value: unknown, fallback: ErrorCorrection): ErrorCorrection {
+  return value === "low" || value === "medium" || value === "quartile" || value === "high"
+    ? value
+    : fallback;
+}
+
+function readWifiEncryption(value: unknown, fallback: WifiEncryption): WifiEncryption {
+  return value === "WEP" || value === "WPA" || value === "nopass" ? value : fallback;
+}
+
+function readHexColor(value: unknown, fallback: string): string {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+}
+
+function readString(value: unknown, fallback: string): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function readNullableString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function readBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function readNumber(value: unknown, fallback: number, min: number, max: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? clamp(value, min, max) : fallback;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function encodeBase64Url(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function decodeBase64Url(value: string): string {
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(
+    Math.ceil(value.length / 4) * 4,
+    "=",
+  );
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+
+  return new TextDecoder().decode(bytes);
+}
+
+function queueHistorySave() {
+  if (!appState.content.trim()) {
+    return;
+  }
+
+  if (historySaveTimer) {
+    window.clearTimeout(historySaveTimer);
+  }
+
+  historySaveTimer = window.setTimeout(() => {
+    historySaveTimer = 0;
+    saveCurrentToHistory();
+  }, 900);
+}
+
+function saveCurrentToHistory() {
+  const settings = toShareableSettings();
+
+  if (!settings.content.trim()) {
+    return;
+  }
+
+  const id = hashString(JSON.stringify(settings));
+  const entry: HistoryEntry = {
+    ...settings,
+    createdAt: Date.now(),
+    id,
+    label: createHistoryLabel(settings),
+  };
+
+  historyEntries = [entry, ...historyEntries.filter((item) => item.id !== id)].slice(
+    0,
+    HISTORY_LIMIT,
+  );
+  persistHistoryEntries();
+  renderHistoryList();
+}
+
+function loadHistoryEntries(): HistoryEntry[] {
+  try {
+    const stored = localStorage.getItem(HISTORY_KEY);
+    const parsed = stored ? (JSON.parse(stored) as unknown) : [];
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map(readHistoryEntry)
+      .filter((entry): entry is HistoryEntry => Boolean(entry))
+      .slice(0, HISTORY_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+function readHistoryEntry(value: unknown): HistoryEntry | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const payloadBuilders = readPayloadBuilders(value.payloadBuilders);
+  const payloadType = readPayloadType(value.payloadType, "raw");
+  const settings: ShareableSettings = {
+    background: readHexColor(value.background, DEFAULT_STATE.background),
+    border: readNumber(value.border, DEFAULT_STATE.border, 1, 8),
+    content: readString(value.content, DEFAULT_STATE.content),
+    errorCorrection: readErrorCorrection(value.errorCorrection, DEFAULT_STATE.errorCorrection),
+    foreground: readHexColor(value.foreground, DEFAULT_STATE.foreground),
+    logoPaddingX: readNumber(
+      value.logoPaddingX,
+      DEFAULT_STATE.logoPaddingX,
+      LOGO_PADDING_MIN,
+      LOGO_PADDING_MAX,
+    ),
+    logoPaddingY: readNumber(
+      value.logoPaddingY,
+      DEFAULT_STATE.logoPaddingY,
+      LOGO_PADDING_MIN,
+      LOGO_PADDING_MAX,
+    ),
+    logoPresetId: readNullableString(value.logoPresetId),
+    logoSize: readNumber(value.logoSize, DEFAULT_STATE.logoSize, 6, 20),
+    payloadBuilders,
+    payloadType,
+    scale: readNumber(value.scale, DEFAULT_STATE.scale, 6, 20),
+    transparent: readBoolean(value.transparent, DEFAULT_STATE.transparent),
+  };
+
+  return {
+    ...settings,
+    createdAt: readNumber(value.createdAt, Date.now(), 0, Number.MAX_SAFE_INTEGER),
+    id: readString(value.id, hashString(JSON.stringify(settings))),
+    label: readString(value.label, createHistoryLabel(settings)),
+  };
+}
+
+function persistHistoryEntries() {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(historyEntries));
+  } catch {
+    // localStorage can be unavailable or full; the generator should keep working.
+  }
+}
+
+function renderHistoryList() {
+  elements.historyCount.textContent =
+    historyEntries.length === 1 ? "1 saved locally" : `${historyEntries.length} saved locally`;
+  elements.historyEmpty.hidden = historyEntries.length > 0;
+  elements.historyClear.disabled = historyEntries.length === 0;
+  elements.historyList.replaceChildren(...historyEntries.map(createHistoryEntryElement));
+}
+
+function createHistoryEntryElement(entry: HistoryEntry): HTMLLIElement {
+  const item = document.createElement("li");
+  const button = document.createElement("button");
+  const label = document.createElement("span");
+  const meta = document.createElement("span");
+
+  button.className = "history-item";
+  button.type = "button";
+  button.dataset.historyId = entry.id;
+  label.className = "history-label";
+  label.textContent = entry.label;
+  meta.className = "history-meta";
+  meta.textContent = `${formatPayloadType(entry.payloadType)} • ${formatHistoryTime(entry.createdAt)}`;
+  button.append(label, meta);
+  item.append(button);
+
+  return item;
+}
+
+function createHistoryLabel(settings: ShareableSettings): string {
+  if (settings.payloadType === "url") {
+    return settings.payloadBuilders.url.value || settings.content;
+  }
+
+  if (settings.payloadType === "wifi") {
+    return settings.payloadBuilders.wifi.ssid || "Wi-Fi network";
+  }
+
+  if (settings.payloadType === "contact") {
+    return settings.payloadBuilders.contact.fullName || "vCard contact";
+  }
+
+  return settings.content.replace(/\s+/g, " ").trim() || "Custom text";
+}
+
+function formatPayloadType(type: PayloadType): string {
+  if (type === "contact") {
+    return "vCard";
+  }
+
+  if (type === "wifi") {
+    return "Wi-Fi";
+  }
+
+  return type === "url" ? "Link" : "Custom";
+}
+
+function formatHistoryTime(timestamp: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(timestamp));
+}
+
+function hashString(value: string): string {
+  let hash = 0;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) | 0;
+  }
+
+  return Math.abs(hash).toString(36);
+}
+
+function updateScanSafety(result: QrResult | null) {
+  if (!result) {
+    elements.scanSafety.dataset.status = "notice";
+    elements.scanSafetySummary.textContent = "Unavailable";
+    elements.scanCheckList.replaceChildren(createScanSafetyItemElement({
+      detail: "Generate a valid QR code first.",
+      label: "No matrix",
+      status: "notice",
+    }));
+    return;
+  }
+
+  const items = evaluateScanSafety(result);
+  const status = getWorstScanSafetyStatus(items);
+
+  elements.scanSafety.dataset.status = status;
+  elements.scanSafetySummary.textContent =
+    status === "good" ? "Ready" : status === "notice" ? "Check print" : "Risky";
+  elements.scanCheckList.replaceChildren(...items.map(createScanSafetyItemElement));
+}
+
+function evaluateScanSafety(result: QrResult): ScanSafetyItem[] {
+  const contrastItem = getContrastSafetyItem();
+  const quietZoneItem = getQuietZoneSafetyItem();
+  const logoItem = getLogoSafetyItem();
+  const payloadItem = getPayloadSafetyItem(result.version);
+  const densityItem = getDensitySafetyItem();
+
+  return [contrastItem, quietZoneItem, logoItem, payloadItem, densityItem];
+}
+
+function getContrastSafetyItem(): ScanSafetyItem {
+  if (appState.transparent) {
+    return {
+      detail: "Transparent exports depend on the final surface color.",
+      label: "Surface unknown",
+      status: "notice",
+    };
+  }
+
+  const ratio = getContrastRatio(appState.foreground, appState.background);
+
+  if (ratio >= 4.5) {
+    return {
+      detail: `Foreground/background contrast is ${ratio.toFixed(1)}:1.`,
+      label: `Contrast ${ratio.toFixed(1)}`,
+      status: "good",
+    };
+  }
+
+  if (ratio >= 3) {
+    return {
+      detail: `Foreground/background contrast is ${ratio.toFixed(1)}:1.`,
+      label: `Contrast ${ratio.toFixed(1)}`,
+      status: "notice",
+    };
+  }
+
+  return {
+    detail: `Foreground/background contrast is ${ratio.toFixed(1)}:1.`,
+    label: `Contrast ${ratio.toFixed(1)}`,
+    status: "warning",
+  };
+}
+
+function getQuietZoneSafetyItem(): ScanSafetyItem {
+  if (appState.border >= 4) {
+    return {
+      detail: `${appState.border} quiet-zone modules.`,
+      label: `Quiet ${appState.border}m`,
+      status: "good",
+    };
+  }
+
+  if (appState.border >= 2) {
+    return {
+      detail: `${appState.border} quiet-zone modules.`,
+      label: `Quiet ${appState.border}m`,
+      status: "notice",
+    };
+  }
+
+  return {
+    detail: `${appState.border} quiet-zone module.`,
+    label: `Quiet ${appState.border}m`,
+    status: "warning",
+  };
+}
+
+function getLogoSafetyItem(): ScanSafetyItem {
+  if (!appState.logoDataUrl) {
+    return {
+      detail: "No center logo is covering modules.",
+      label: "No logo",
+      status: "good",
+    };
+  }
+
+  const coverWidth = appState.logoSize + appState.logoPaddingX * 2;
+  const coverHeight = appState.logoSize + appState.logoPaddingY * 2;
+  const cover = Math.max(coverWidth, coverHeight);
+
+  if (cover <= 24) {
+    return {
+      detail: `Logo clear patch covers about ${cover.toFixed(0)}% of the matrix width.`,
+      label: "Logo safe",
+      status: "good",
+    };
+  }
+
+  if (cover <= 30) {
+    return {
+      detail: `Logo clear patch covers about ${cover.toFixed(0)}% of the matrix width.`,
+      label: "Logo large",
+      status: "notice",
+    };
+  }
+
+  return {
+    detail: `Logo clear patch covers about ${cover.toFixed(0)}% of the matrix width.`,
+    label: "Logo risky",
+    status: "warning",
+  };
+}
+
+function getPayloadSafetyItem(version: number): ScanSafetyItem {
+  if (version <= 7) {
+    return {
+      detail: `QR version ${version}.`,
+      label: `Payload v${version}`,
+      status: "good",
+    };
+  }
+
+  if (version <= 14) {
+    return {
+      detail: `QR version ${version}.`,
+      label: `Payload v${version}`,
+      status: "notice",
+    };
+  }
+
+  return {
+    detail: `QR version ${version}.`,
+    label: `Payload v${version}`,
+    status: "warning",
+  };
+}
+
+function getDensitySafetyItem(): ScanSafetyItem {
+  if (appState.scale >= 10) {
+    return {
+      detail: `${appState.scale} pixels per module for PNG export.`,
+      label: `${appState.scale}px/mod`,
+      status: "good",
+    };
+  }
+
+  if (appState.scale >= 8) {
+    return {
+      detail: `${appState.scale} pixels per module for PNG export.`,
+      label: `${appState.scale}px/mod`,
+      status: "notice",
+    };
+  }
+
+  return {
+    detail: `${appState.scale} pixels per module for PNG export.`,
+    label: `${appState.scale}px/mod`,
+    status: "warning",
+  };
+}
+
+function createScanSafetyItemElement(item: ScanSafetyItem): HTMLLIElement {
+  const element = document.createElement("li");
+
+  element.className = "scan-check";
+  element.dataset.status = item.status;
+  element.textContent = item.label;
+  element.title = item.detail;
+
+  return element;
+}
+
+function getWorstScanSafetyStatus(items: ScanSafetyItem[]): ScanSafetyStatus {
+  if (items.some((item) => item.status === "warning")) {
+    return "warning";
+  }
+
+  if (items.some((item) => item.status === "notice")) {
+    return "notice";
+  }
+
+  return "good";
+}
+
+function getContrastRatio(foreground: string, background: string): number {
+  const foregroundLuminance = getRelativeLuminance(hexToRgb(foreground));
+  const backgroundLuminance = getRelativeLuminance(hexToRgb(background));
+  const lighter = Math.max(foregroundLuminance, backgroundLuminance);
+  const darker = Math.min(foregroundLuminance, backgroundLuminance);
+
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function getRelativeLuminance([red, green, blue]: [number, number, number]): number {
+  const [linearRed, linearGreen, linearBlue] = [red, green, blue].map((channel) => {
+    const value = channel / 255;
+
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+
+  return 0.2126 * linearRed + 0.7152 * linearGreen + 0.0722 * linearBlue;
+}
+
+function hexToRgb(color: string): [number, number, number] {
+  const normalized = color.replace("#", "");
+  const hex =
+    normalized.length === 3
+      ? normalized
+          .split("")
+          .map((character) => `${character}${character}`)
+          .join("")
+      : normalized.padEnd(6, "0").slice(0, 6);
+
+  return [
+    Number.parseInt(hex.slice(0, 2), 16),
+    Number.parseInt(hex.slice(2, 4), 16),
+    Number.parseInt(hex.slice(4, 6), 16),
+  ];
 }
 
 function syncLogoUi() {
@@ -1023,6 +2068,79 @@ function downloadBlob(blob: Blob, filename: string) {
   anchor.click();
   anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+async function copyTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-9999px";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.select();
+
+  try {
+    if (!document.execCommand("copy")) {
+      throw new Error("Copy command failed.");
+    }
+  } finally {
+    textarea.remove();
+  }
+}
+
+function setClipboardFeedback(button: HTMLButtonElement, message: string) {
+  const label = button.querySelector<HTMLElement>(".button-label");
+
+  if (!label) {
+    return;
+  }
+
+  const originalLabel = button.dataset.defaultLabel || label.textContent || "";
+  button.dataset.defaultLabel = originalLabel;
+  label.textContent = message;
+  elements.clipboardStatus.textContent = message;
+
+  const previousTimer = buttonFeedbackTimers.get(button);
+  if (previousTimer) {
+    window.clearTimeout(previousTimer);
+  }
+
+  const timer = window.setTimeout(() => {
+    label.textContent = originalLabel;
+    buttonFeedbackTimers.delete(button);
+  }, 1600);
+
+  buttonFeedbackTimers.set(button, timer);
+}
+
+function setIconButtonFeedback(button: HTMLButtonElement, message: string) {
+  const originalLabel = button.dataset.defaultLabel || button.getAttribute("aria-label") || "";
+
+  button.dataset.defaultLabel = originalLabel;
+  button.dataset.copied = "true";
+  button.setAttribute("aria-label", message);
+  button.title = message;
+  elements.clipboardStatus.textContent = message;
+
+  const previousTimer = buttonFeedbackTimers.get(button);
+  if (previousTimer) {
+    window.clearTimeout(previousTimer);
+  }
+
+  const timer = window.setTimeout(() => {
+    button.dataset.copied = "false";
+    button.setAttribute("aria-label", originalLabel);
+    button.title = originalLabel;
+    buttonFeedbackTimers.delete(button);
+  }, 1600);
+
+  buttonFeedbackTimers.set(button, timer);
 }
 
 function getErrorMessage(error: unknown): string {

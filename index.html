@@ -55,10 +55,73 @@
             <p class="panel-desc">What should the QR code contain?</p>
           </div>
           
-          <div class="preset-row" aria-label="Preset payloads">
-            <button class="preset-button" data-preset="url" type="button">Link (URL)</button>
-            <button class="preset-button" data-preset="wifi" type="button">Wi-Fi Network</button>
-            <button class="preset-button" data-preset="contact" type="button">vCard Contact</button>
+          <div class="preset-row" aria-label="Payload formats">
+            <button class="preset-button" data-payload-type="url" type="button" aria-pressed="true">Link</button>
+            <button class="preset-button" data-payload-type="wifi" type="button" aria-pressed="false">Wi-Fi</button>
+            <button class="preset-button" data-payload-type="contact" type="button" aria-pressed="false">vCard</button>
+            <button class="preset-button" data-payload-type="raw" type="button" aria-pressed="false">Custom Text</button>
+          </div>
+
+          <div class="payload-builder" id="payload-builder">
+            <div class="builder-fields" data-builder="url">
+              <label class="builder-field">
+                <span>URL</span>
+                <input id="payload-url-input" type="url" inputmode="url" autocomplete="url" />
+              </label>
+            </div>
+
+            <div class="builder-fields builder-grid" data-builder="wifi" hidden>
+              <label class="builder-field">
+                <span>Network</span>
+                <input id="wifi-ssid-input" type="text" autocomplete="off" />
+              </label>
+              <label class="builder-field">
+                <span>Password</span>
+                <input id="wifi-password-input" type="text" autocomplete="off" />
+              </label>
+              <label class="builder-field">
+                <span>Security</span>
+                <select id="wifi-encryption-select">
+                  <option value="WPA">WPA/WPA2</option>
+                  <option value="WEP">WEP</option>
+                  <option value="nopass">Open</option>
+                </select>
+              </label>
+              <label class="toggle-field compact-toggle" for="wifi-hidden-toggle">
+                <div class="toggle-switch">
+                  <input id="wifi-hidden-toggle" type="checkbox" />
+                  <span class="slider"></span>
+                </div>
+                <span>Hidden network</span>
+              </label>
+            </div>
+
+            <div class="builder-fields builder-grid" data-builder="contact" hidden>
+              <label class="builder-field">
+                <span>Name</span>
+                <input id="contact-name-input" type="text" autocomplete="name" />
+              </label>
+              <label class="builder-field">
+                <span>Organization</span>
+                <input id="contact-org-input" type="text" autocomplete="organization" />
+              </label>
+              <label class="builder-field">
+                <span>Title</span>
+                <input id="contact-title-input" type="text" autocomplete="organization-title" />
+              </label>
+              <label class="builder-field">
+                <span>Phone</span>
+                <input id="contact-phone-input" type="tel" autocomplete="tel" />
+              </label>
+              <label class="builder-field">
+                <span>Email</span>
+                <input id="contact-email-input" type="email" autocomplete="email" />
+              </label>
+              <label class="builder-field">
+                <span>Website</span>
+                <input id="contact-url-input" type="url" inputmode="url" autocomplete="url" />
+              </label>
+            </div>
           </div>
 
           <label class="sr-only" for="content-input">QR content</label>
@@ -69,6 +132,16 @@
             spellcheck="false"
             placeholder="Paste a URL, Wi-Fi configuration string, or any plain text..."
           ></textarea>
+
+          <details class="history-box" id="history-box">
+            <summary>Recent QR codes</summary>
+            <div class="history-toolbar">
+              <span id="history-count">Local history</span>
+              <button class="history-clear" id="history-clear" type="button">Clear</button>
+            </div>
+            <p class="history-empty" id="history-empty">No recent QR codes yet.</p>
+            <ul class="history-list" id="history-list"></ul>
+          </details>
         </div>
 
         <div class="panel controls-panel">
@@ -226,6 +299,18 @@
           <div class="preview-header">
             <div class="preview-title">
               <h2>Live Preview</h2>
+              <button
+                class="icon-action share-settings-button"
+                id="copy-settings-link"
+                type="button"
+                aria-label="Copy settings link"
+                title="Copy settings link"
+              >
+                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.43" />
+                  <path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07l1.33-1.33" />
+                </svg>
+              </button>
             </div>
             <span class="status-pill" id="engine-status">
               <span class="pulse-dot"></span>
@@ -264,16 +349,33 @@
             </dl>
           </div>
 
+          <div class="scan-safety" id="scan-safety" data-status="notice">
+            <div class="scan-safety-header">
+              <h3>Scan Safety</h3>
+              <span id="scan-safety-summary">Checking</span>
+            </div>
+            <ul class="scan-check-list" id="scan-check-list" aria-label="Scan safety checks"></ul>
+          </div>
+
           <div class="action-row">
             <button class="action-button primary export-btn" id="download-svg" type="button">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              Export Vector (SVG)
+              <span class="button-label">Export SVG</span>
             </button>
             <button class="action-button secondary export-btn" id="download-png" type="button">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              Export Bitmap (PNG)
+              <span class="button-label">Export PNG</span>
+            </button>
+            <button class="action-button secondary export-btn" id="copy-svg" type="button">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+              <span class="button-label">Copy SVG</span>
+            </button>
+            <button class="action-button secondary export-btn" id="copy-png" type="button">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+              <span class="button-label">Copy PNG</span>
             </button>
           </div>
+          <p class="sr-only" id="clipboard-status" aria-live="polite"></p>
 
         </aside>
       </section>
