@@ -13,6 +13,7 @@ type AppState = {
   logoName: string | null;
   logoPaddingX: number;
   logoPaddingY: number;
+  logoPresetId: string | null;
   logoSize: number;
   scale: number;
   transparent: boolean;
@@ -33,6 +34,12 @@ type LogoPaddingDrag = {
   startPaddingY: number;
   startX: number;
   startY: number;
+};
+
+type PresetLogo = {
+  id: string;
+  label: string;
+  source: string;
 };
 
 const LOGO_PADDING_MAX = 8;
@@ -59,6 +66,40 @@ const PRESETS: Record<string, string> = {
 const CONTACT_EMAIL = "mxh1029@case.edu";
 const CAPTCHA_COLORS = ["#1a1a1a", "#2a2a2a", "#0a0a0a", "#333333"];
 
+const PRESET_LOGOS: PresetLogo[] = [
+  {
+    id: "github",
+    label: "GitHub",
+    source: new URL("../assets/logo/github.svg", import.meta.url).href,
+  },
+  {
+    id: "arxiv",
+    label: "arXiv",
+    source: new URL("../assets/logo/arxiv.svg", import.meta.url).href,
+  },
+  {
+    id: "pypi",
+    label: "PyPI",
+    source: new URL("../assets/logo/pypi.svg", import.meta.url).href,
+  },
+  {
+    id: "qwen",
+    label: "Qwen",
+    source: new URL("../assets/logo/qwen.svg", import.meta.url).href,
+  },
+  { id: "acl", label: "ACL", source: new URL("../assets/logo/acl.svg", import.meta.url).href },
+  {
+    id: "rtd",
+    label: "Docs",
+    source: new URL("../assets/logo/rtd.svg", import.meta.url).href,
+  },
+  {
+    id: "scorio",
+    label: "Scorio",
+    source: new URL("../assets/logo/scorio.svg", import.meta.url).href,
+  },
+];
+
 const DEFAULT_STATE: AppState = {
   background: "#f7f1e6",
   border: 4,
@@ -69,6 +110,7 @@ const DEFAULT_STATE: AppState = {
   logoName: null,
   logoPaddingX: 3.5,
   logoPaddingY: 3.5,
+  logoPresetId: null,
   logoSize: 11,
   scale: 12,
   transparent: false,
@@ -120,6 +162,7 @@ const elements = {
   ),
   logoPreviewImage: getElement<HTMLImageElement>("#logo-preview-image", "logo preview image"),
   logoPreviewShell: getElement<HTMLElement>("#logo-preview-shell", "logo preview shell"),
+  logoPresetGrid: getElement<HTMLElement>("#logo-preset-grid", "built-in logo choices"),
   logoSizeRange: getElement<HTMLInputElement>("#logo-size-range", "logo size range"),
   logoSizeValue: getElement<HTMLOutputElement>("#logo-size-value", "logo size value"),
   logoStatus: getElement<HTMLElement>("#logo-status", "logo status"),
@@ -144,9 +187,11 @@ let appState: AppState = { ...DEFAULT_STATE };
 let lastFocusedElement: Element | null = null;
 let lastResult: QrResult | null = null;
 let logoPaddingDrag: LogoPaddingDrag | null = null;
+let logoPresetLoadId = 0;
 let pendingFrame = 0;
 
 async function bootstrap() {
+  renderPresetLogoButtons();
   hydrateControls(appState);
   setDownloadsEnabled(false);
 
@@ -219,6 +264,7 @@ function bindEvents() {
     try {
       appState.logoDataUrl = await readFileAsDataUrl(file);
       appState.logoName = file.name;
+      appState.logoPresetId = null;
       appState.errorCorrection = "high";
       elements.eccSelect.value = "high";
       elements.logoInput.value = "";
@@ -302,6 +348,68 @@ function bindEvents() {
       elements.contentInput.value = value;
       scheduleRender();
     });
+  }
+}
+
+function renderPresetLogoButtons() {
+  elements.logoPresetGrid.replaceChildren(
+    ...PRESET_LOGOS.map((logo) => {
+      const button = document.createElement("button");
+      const image = document.createElement("img");
+      const label = document.createElement("span");
+
+      button.className = "logo-preset-button";
+      button.dataset.logoPreset = logo.id;
+      button.type = "button";
+      button.setAttribute("aria-label", `Use ${logo.label} logo`);
+      button.title = `Use ${logo.label} logo`;
+      button.setAttribute("aria-pressed", "false");
+
+      image.alt = "";
+      image.decoding = "async";
+      image.loading = "lazy";
+      image.src = logo.source;
+
+      label.textContent = logo.label;
+
+      button.append(image, label);
+      button.addEventListener("click", () => {
+        void selectPresetLogo(logo);
+      });
+
+      return button;
+    }),
+  );
+}
+
+async function selectPresetLogo(logo: PresetLogo) {
+  const requestId = logoPresetLoadId + 1;
+  logoPresetLoadId = requestId;
+
+  try {
+    const response = await fetch(logo.source);
+
+    if (!response.ok) {
+      throw new Error(`Logo request failed with ${response.status}.`);
+    }
+
+    const dataUrl = await readFileAsDataUrl(await response.blob());
+
+    if (requestId !== logoPresetLoadId) {
+      return;
+    }
+
+    appState.logoDataUrl = dataUrl;
+    appState.logoName = logo.label;
+    appState.logoPresetId = logo.id;
+    appState.errorCorrection = "high";
+    elements.eccSelect.value = "high";
+    elements.logoInput.value = "";
+    syncLogoUi();
+    showError("");
+    scheduleRender();
+  } catch {
+    showError(`The ${logo.label} logo could not be loaded.`);
   }
 }
 
@@ -610,6 +718,14 @@ function syncLogoUi() {
   for (const field of elements.logoTuneFields) {
     field.hidden = !hasLogo;
   }
+  for (const button of elements.logoPresetGrid.querySelectorAll<HTMLButtonElement>(
+    ".logo-preset-button",
+  )) {
+    button.setAttribute(
+      "aria-pressed",
+      button.dataset.logoPreset === appState.logoPresetId ? "true" : "false",
+    );
+  }
   elements.logoPreviewImage.hidden = !hasLogo;
   elements.logoPreviewImage.src = appState.logoDataUrl ?? "";
   elements.logoStatus.textContent = hasLogo
@@ -865,11 +981,12 @@ function clamp(value: number, min: number, max: number): number {
 function clearLogo() {
   appState.logoDataUrl = null;
   appState.logoName = null;
+  appState.logoPresetId = null;
   elements.logoInput.value = "";
   syncLogoUi();
 }
 
-function readFileAsDataUrl(file: File): Promise<string> {
+function readFileAsDataUrl(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 

@@ -317,6 +317,7 @@ textarea:focus {
 
   .logo-upload-field > span,
   .logo-upload-field > .field-note,
+  .logo-upload-field > .logo-preset-grid,
   .logo-upload-field > .file-input-wrapper,
   .logo-upload-field > .logo-card {
     grid-column: 1 / -1;
@@ -328,7 +329,7 @@ textarea:focus {
   }
 }
 
-@media (min-width: 1024px) and (max-height: 850px) {
+@media (min-width: 1024px) and (max-height: 920px) {
   .app-layout {
     gap: 1.25rem;
     padding-top: 1rem;
@@ -511,6 +512,82 @@ input[type="file"]::file-selector-button {
   border-radius: var(--radius-sm);
   margin-right: 1rem;
   cursor: pointer;
+}
+
+.logo-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(5.25rem, 1fr));
+  gap: 0.5rem;
+}
+
+@media (min-width: 1024px) {
+  .logo-preset-grid {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+}
+
+.logo-preset-button {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  min-height: 2.5rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  color: var(--text-main);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+@media (min-width: 1024px) {
+  .logo-preset-button {
+    justify-content: center;
+    min-height: 2.25rem;
+    padding: 0.35rem;
+  }
+}
+
+.logo-preset-button:hover {
+  border-color: var(--border-strong);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.logo-preset-button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-input));
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.logo-preset-button img {
+  width: 1.45rem;
+  height: 1.45rem;
+  flex: 0 0 auto;
+  object-fit: contain;
+  padding: 0.18rem;
+  border-radius: var(--radius-sm);
+  background: #ffffff;
+}
+
+.logo-preset-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (min-width: 1024px) {
+  .logo-preset-button span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+  }
 }
 
 .logo-card {
@@ -1122,7 +1199,7 @@ html[data-theme="light"] .site-footer {
   background: rgba(255, 255, 255, 0.72);
 }
 
-@media (min-width: 1024px) and (max-height: 850px) {
+@media (min-width: 1024px) and (max-height: 920px) {
   body {
     height: 100svh;
     overflow: hidden;
