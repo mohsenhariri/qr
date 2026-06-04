@@ -96,9 +96,13 @@ type HistoryEntry = ShareableSettings & {
   label: string;
 };
 
-const LOGO_PADDING_MAX = 8;
-const LOGO_PADDING_MIN = 0;
 const LOGO_PADDING_STEP = 0.5;
+const LOGO_PADDING_X_MAX = 8;
+const LOGO_PADDING_X_MIN = 0;
+const LOGO_PADDING_Y_MAX = 8;
+const LOGO_PADDING_Y_MIN = -20;
+const LOGO_SIZE_MAX = 60;
+const LOGO_SIZE_MIN = 6;
 
 const DEFAULT_PAYLOAD_BUILDERS: PayloadBuilders = {
   contact: {
@@ -309,6 +313,15 @@ async function bootstrap() {
   bindEvents();
 }
 
+function configureControlRanges(state: AppState) {
+  elements.logoPaddingXRange.min = String(LOGO_PADDING_X_MIN);
+  elements.logoPaddingXRange.max = String(LOGO_PADDING_X_MAX);
+  elements.logoPaddingYRange.min = String(getLogoPaddingYMin(state.logoSize));
+  elements.logoPaddingYRange.max = String(LOGO_PADDING_Y_MAX);
+  elements.logoSizeRange.min = String(LOGO_SIZE_MIN);
+  elements.logoSizeRange.max = String(LOGO_SIZE_MAX);
+}
+
 function bindEvents() {
   bindFooterEvents();
   bindHistoryEvents();
@@ -383,9 +396,7 @@ function bindEvents() {
   });
 
   elements.logoSizeRange.addEventListener("input", () => {
-    appState.logoSize = Number(elements.logoSizeRange.value);
-    elements.logoSizeValue.textContent = formatPercent(appState.logoSize);
-    syncLogoUi();
+    setLogoSize(Number(elements.logoSizeRange.value));
     scheduleRender();
   });
 
@@ -889,6 +900,7 @@ async function renderPngBlob(result: QrResult): Promise<Blob | null> {
 }
 
 function hydrateControls(state: AppState) {
+  configureControlRanges(state);
   elements.contentInput.value = state.content;
   hydratePayloadBuilderControls(state.payloadBuilders);
   elements.eccSelect.value = state.errorCorrection;
@@ -1184,6 +1196,7 @@ function readShareableSettings(): ShareableSettings | null {
 
     const payloadBuilders = readPayloadBuilders(decoded.payloadBuilders);
     const payloadType = readPayloadType(decoded.payloadType, "raw");
+    const logoSize = readNumber(decoded.logoSize, DEFAULT_STATE.logoSize, LOGO_SIZE_MIN, LOGO_SIZE_MAX);
 
     return {
       background: readHexColor(decoded.background, DEFAULT_STATE.background),
@@ -1194,17 +1207,17 @@ function readShareableSettings(): ShareableSettings | null {
       logoPaddingX: readNumber(
         decoded.logoPaddingX,
         DEFAULT_STATE.logoPaddingX,
-        LOGO_PADDING_MIN,
-        LOGO_PADDING_MAX,
+        LOGO_PADDING_X_MIN,
+        LOGO_PADDING_X_MAX,
       ),
       logoPaddingY: readNumber(
         decoded.logoPaddingY,
         DEFAULT_STATE.logoPaddingY,
-        LOGO_PADDING_MIN,
-        LOGO_PADDING_MAX,
+        getLogoPaddingYMin(logoSize),
+        LOGO_PADDING_Y_MAX,
       ),
       logoPresetId: readNullableString(decoded.logoPresetId),
-      logoSize: readNumber(decoded.logoSize, DEFAULT_STATE.logoSize, 6, 20),
+      logoSize,
       payloadBuilders,
       payloadType,
       scale: readNumber(decoded.scale, DEFAULT_STATE.scale, 6, 20),
@@ -1407,6 +1420,7 @@ function readHistoryEntry(value: unknown): HistoryEntry | null {
 
   const payloadBuilders = readPayloadBuilders(value.payloadBuilders);
   const payloadType = readPayloadType(value.payloadType, "raw");
+  const logoSize = readNumber(value.logoSize, DEFAULT_STATE.logoSize, LOGO_SIZE_MIN, LOGO_SIZE_MAX);
   const settings: ShareableSettings = {
     background: readHexColor(value.background, DEFAULT_STATE.background),
     border: readNumber(value.border, DEFAULT_STATE.border, 1, 8),
@@ -1416,17 +1430,17 @@ function readHistoryEntry(value: unknown): HistoryEntry | null {
     logoPaddingX: readNumber(
       value.logoPaddingX,
       DEFAULT_STATE.logoPaddingX,
-      LOGO_PADDING_MIN,
-      LOGO_PADDING_MAX,
+      LOGO_PADDING_X_MIN,
+      LOGO_PADDING_X_MAX,
     ),
     logoPaddingY: readNumber(
       value.logoPaddingY,
       DEFAULT_STATE.logoPaddingY,
-      LOGO_PADDING_MIN,
-      LOGO_PADDING_MAX,
+      getLogoPaddingYMin(logoSize),
+      LOGO_PADDING_Y_MAX,
     ),
     logoPresetId: readNullableString(value.logoPresetId),
-    logoSize: readNumber(value.logoSize, DEFAULT_STATE.logoSize, 6, 20),
+    logoSize,
     payloadBuilders,
     payloadType,
     scale: readNumber(value.scale, DEFAULT_STATE.scale, 6, 20),
@@ -1995,15 +2009,34 @@ function formatPercent(value: number): string {
   return `${Number.isInteger(value) ? value : value.toFixed(1)}%`;
 }
 
+function setLogoSize(value: number) {
+  appState.logoSize = clamp(value, LOGO_SIZE_MIN, LOGO_SIZE_MAX);
+  configureControlRanges(appState);
+  elements.logoSizeRange.value = String(appState.logoSize);
+  elements.logoSizeValue.textContent = formatPercent(appState.logoSize);
+  appState.logoPaddingY = normalizeLogoPadding(
+    appState.logoPaddingY,
+    getLogoPaddingYMin(appState.logoSize),
+    LOGO_PADDING_Y_MAX,
+  );
+  elements.logoPaddingYRange.value = String(appState.logoPaddingY);
+  elements.logoPaddingYValue.textContent = formatPercent(appState.logoPaddingY);
+  syncLogoUi();
+}
+
 function setLogoPadding(next: { x?: number; y?: number }) {
   if (typeof next.x === "number") {
-    appState.logoPaddingX = normalizeLogoPadding(next.x);
+    appState.logoPaddingX = normalizeLogoPadding(next.x, LOGO_PADDING_X_MIN, LOGO_PADDING_X_MAX);
     elements.logoPaddingXRange.value = String(appState.logoPaddingX);
     elements.logoPaddingXValue.textContent = formatPercent(appState.logoPaddingX);
   }
 
   if (typeof next.y === "number") {
-    appState.logoPaddingY = normalizeLogoPadding(next.y);
+    appState.logoPaddingY = normalizeLogoPadding(
+      next.y,
+      getLogoPaddingYMin(appState.logoSize),
+      LOGO_PADDING_Y_MAX,
+    );
     elements.logoPaddingYRange.value = String(appState.logoPaddingY);
     elements.logoPaddingYValue.textContent = formatPercent(appState.logoPaddingY);
   }
@@ -2011,8 +2044,12 @@ function setLogoPadding(next: { x?: number; y?: number }) {
   syncLogoUi();
 }
 
-function normalizeLogoPadding(value: number): number {
-  return clamp(roundToStep(value, LOGO_PADDING_STEP), LOGO_PADDING_MIN, LOGO_PADDING_MAX);
+function normalizeLogoPadding(value: number, min: number, max: number): number {
+  return clamp(roundToStep(value, LOGO_PADDING_STEP), min, max);
+}
+
+function getLogoPaddingYMin(logoSize: number): number {
+  return Math.max(LOGO_PADDING_Y_MIN, -(logoSize / 2));
 }
 
 function roundToStep(value: number, step: number): number {
