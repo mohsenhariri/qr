@@ -90,6 +90,26 @@ type ShareableSettings = {
   transparent: boolean;
 };
 
+type ConfigSettings = Pick<
+  ShareableSettings,
+  | "background"
+  | "border"
+  | "errorCorrection"
+  | "foreground"
+  | "logoPaddingX"
+  | "logoPaddingY"
+  | "logoPresetId"
+  | "logoSize"
+  | "scale"
+  | "transparent"
+>;
+
+type ConfigEntry = ConfigSettings & {
+  createdAt: number;
+  id: string;
+  label: string;
+};
+
 type HistoryEntry = ShareableSettings & {
   createdAt: number;
   id: string;
@@ -130,8 +150,11 @@ const DEFAULT_PAYLOAD_BUILDERS: PayloadBuilders = {
 
 const CONTACT_EMAIL = "mxh1029@case.edu";
 const CAPTCHA_COLORS = ["#1a1a1a", "#2a2a2a", "#0a0a0a", "#333333"];
+const CONFIGS_KEY = "vector-qr-studio-configs";
+const CONFIG_LIMIT = 6;
 const HISTORY_KEY = "vector-qr-studio-history";
 const HISTORY_LIMIT = 6;
+const SETTINGS_KEY = "vector-qr-studio-settings";
 
 const PRESET_LOGOS: PresetLogo[] = [
   {
@@ -203,6 +226,10 @@ const elements = {
   captchaText: getElement<HTMLElement>("#captcha-text", "captcha text"),
   clearLogo: getElement<HTMLButtonElement>("#clear-logo", "clear logo button"),
   clipboardStatus: getElement<HTMLElement>("#clipboard-status", "clipboard status"),
+  configClear: getElement<HTMLButtonElement>("#config-clear", "clear configs button"),
+  configCount: getElement<HTMLElement>("#config-count", "config count"),
+  configEmpty: getElement<HTMLElement>("#config-empty", "empty configs message"),
+  configList: getElement<HTMLUListElement>("#config-list", "config list"),
   contactEmailInput: getElement<HTMLInputElement>("#contact-email-input", "contact email input"),
   contactNameInput: getElement<HTMLInputElement>("#contact-name-input", "contact name input"),
   contactOrgInput: getElement<HTMLInputElement>(
@@ -288,6 +315,7 @@ const elements = {
 };
 
 let appState: AppState = createDefaultState();
+let configEntries: ConfigEntry[] = [];
 let historyEntries: HistoryEntry[] = [];
 let historySaveTimer = 0;
 let lastFocusedElement: Element | null = null;
@@ -295,13 +323,18 @@ let lastResult: QrResult | null = null;
 let logoPaddingDrag: LogoPaddingDrag | null = null;
 let logoPresetLoadId = 0;
 let pendingFrame = 0;
+let settingsSaveTimer = 0;
 const buttonFeedbackTimers = new Map<HTMLButtonElement, number>();
 
 async function bootstrap() {
   renderPresetLogoButtons();
+  configEntries = loadConfigEntries();
+  renderConfigList();
   historyEntries = loadHistoryEntries();
   renderHistoryList();
-  hydrateStateFromShareUrl();
+  if (!hydrateStateFromShareUrl()) {
+    hydrateStateFromSavedSettings();
+  }
   hydrateControls(appState);
   setDownloadsEnabled(false);
 
@@ -332,6 +365,7 @@ function configureControlRanges(state: AppState) {
 
 function bindEvents() {
   bindFooterEvents();
+  bindConfigEvents();
   bindHistoryEvents();
 
   elements.contentInput.addEventListener("input", () => {
@@ -527,6 +561,29 @@ function bindEvents() {
   }
 
   bindPayloadBuilderEvents();
+}
+
+function bindConfigEvents() {
+  elements.configList.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-config-id]");
+
+    if (!button) {
+      return;
+    }
+
+    const entry = configEntries.find((item) => item.id === button.dataset.configId);
+    if (!entry) {
+      return;
+    }
+
+    restoreConfigSettings(entry);
+  });
+
+  elements.configClear.addEventListener("click", () => {
+    configEntries = [];
+    persistConfigEntries();
+    renderConfigList();
+  });
 }
 
 function bindHistoryEvents() {
@@ -821,6 +878,7 @@ function render() {
     elements.statSize.textContent = `${size} × ${size}`;
     elements.statDark.textContent = darkModules.toLocaleString();
     updateScanSafety(lastResult);
+    queueSettingsSave();
     queueHistorySave();
   } catch (error) {
     lastResult = null;
@@ -1148,8 +1206,19 @@ function createDefaultState(): AppState {
   };
 }
 
-function hydrateStateFromShareUrl() {
+function hydrateStateFromShareUrl(): boolean {
   const settings = readShareableSettings();
+
+  if (!settings) {
+    return false;
+  }
+
+  applyShareableSettings(settings);
+  return true;
+}
+
+function hydrateStateFromSavedSettings() {
+  const settings = loadSavedSettings();
 
   if (!settings) {
     return;
@@ -1160,6 +1229,12 @@ function hydrateStateFromShareUrl() {
 
 function restoreShareableSettings(settings: ShareableSettings) {
   applyShareableSettings(settings);
+  hydrateControls(appState);
+  renderLogoPresetOrQr();
+}
+
+function restoreConfigSettings(settings: ConfigSettings) {
+  applyConfigSettings(settings);
   hydrateControls(appState);
   renderLogoPresetOrQr();
 }
@@ -1188,6 +1263,24 @@ function applyShareableSettings(settings: ShareableSettings) {
   };
 }
 
+function applyConfigSettings(settings: ConfigSettings) {
+  appState = {
+    ...appState,
+    background: settings.background,
+    border: settings.border,
+    errorCorrection: settings.errorCorrection,
+    foreground: settings.foreground,
+    logoDataUrl: null,
+    logoName: null,
+    logoPaddingX: settings.logoPaddingX,
+    logoPaddingY: settings.logoPaddingY,
+    logoPresetId: getPresetLogo(settings.logoPresetId)?.id ?? null,
+    logoSize: settings.logoSize,
+    scale: settings.scale,
+    transparent: settings.transparent,
+  };
+}
+
 function renderLogoPresetOrQr() {
   const sharedLogo = getPresetLogo(appState.logoPresetId);
 
@@ -1208,39 +1301,17 @@ function readShareableSettings(): ShareableSettings | null {
   try {
     const decoded = JSON.parse(decodeBase64Url(hash.slice(2))) as unknown;
 
-    if (!isRecord(decoded)) {
-      return null;
-    }
+    return readSettingsRecord(decoded);
+  } catch {
+    return null;
+  }
+}
 
-    const payloadBuilders = readPayloadBuilders(decoded.payloadBuilders);
-    const payloadType = readPayloadType(decoded.payloadType, "raw");
-    const logoSize = readNumber(decoded.logoSize, DEFAULT_STATE.logoSize, LOGO_SIZE_MIN, LOGO_SIZE_MAX);
+function loadSavedSettings(): ShareableSettings | null {
+  try {
+    const stored = localStorage.getItem(SETTINGS_KEY);
 
-    return {
-      background: readHexColor(decoded.background, DEFAULT_STATE.background),
-      border: readNumber(decoded.border, DEFAULT_STATE.border, QUIET_ZONE_MIN, QUIET_ZONE_MAX),
-      content: readString(decoded.content, DEFAULT_STATE.content),
-      errorCorrection: readErrorCorrection(decoded.errorCorrection, DEFAULT_STATE.errorCorrection),
-      foreground: readHexColor(decoded.foreground, DEFAULT_STATE.foreground),
-      logoPaddingX: readNumber(
-        decoded.logoPaddingX,
-        DEFAULT_STATE.logoPaddingX,
-        LOGO_PADDING_X_MIN,
-        LOGO_PADDING_X_MAX,
-      ),
-      logoPaddingY: readNumber(
-        decoded.logoPaddingY,
-        DEFAULT_STATE.logoPaddingY,
-        getLogoPaddingYMin(logoSize),
-        LOGO_PADDING_Y_MAX,
-      ),
-      logoPresetId: readNullableString(decoded.logoPresetId),
-      logoSize,
-      payloadBuilders,
-      payloadType,
-      scale: readNumber(decoded.scale, DEFAULT_STATE.scale, SCALE_MIN, SCALE_MAX),
-      transparent: readBoolean(decoded.transparent, DEFAULT_STATE.transparent),
-    };
+    return stored ? readSettingsRecord(JSON.parse(stored) as unknown) : null;
   } catch {
     return null;
   }
@@ -1272,12 +1343,94 @@ function toShareableSettings(): ShareableSettings {
   };
 }
 
+function toConfigSettings(): ConfigSettings {
+  return {
+    background: appState.background,
+    border: appState.border,
+    errorCorrection: appState.errorCorrection,
+    foreground: appState.foreground,
+    logoPaddingX: appState.logoPaddingX,
+    logoPaddingY: appState.logoPaddingY,
+    logoPresetId: appState.logoPresetId,
+    logoSize: appState.logoSize,
+    scale: appState.scale,
+    transparent: appState.transparent,
+  };
+}
+
 function getPresetLogo(id: string | null): PresetLogo | null {
   if (!id) {
     return null;
   }
 
   return PRESET_LOGOS.find((logo) => logo.id === id) ?? null;
+}
+
+function readSettingsRecord(value: unknown): ShareableSettings | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const payloadBuilders = readPayloadBuilders(value.payloadBuilders);
+  const payloadType = readPayloadType(value.payloadType, "raw");
+  const logoSize = readNumber(value.logoSize, DEFAULT_STATE.logoSize, LOGO_SIZE_MIN, LOGO_SIZE_MAX);
+
+  return {
+    background: readHexColor(value.background, DEFAULT_STATE.background),
+    border: readNumber(value.border, DEFAULT_STATE.border, QUIET_ZONE_MIN, QUIET_ZONE_MAX),
+    content: readString(value.content, DEFAULT_STATE.content),
+    errorCorrection: readErrorCorrection(value.errorCorrection, DEFAULT_STATE.errorCorrection),
+    foreground: readHexColor(value.foreground, DEFAULT_STATE.foreground),
+    logoPaddingX: readNumber(
+      value.logoPaddingX,
+      DEFAULT_STATE.logoPaddingX,
+      LOGO_PADDING_X_MIN,
+      LOGO_PADDING_X_MAX,
+    ),
+    logoPaddingY: readNumber(
+      value.logoPaddingY,
+      DEFAULT_STATE.logoPaddingY,
+      getLogoPaddingYMin(logoSize),
+      LOGO_PADDING_Y_MAX,
+    ),
+    logoPresetId: readNullableString(value.logoPresetId),
+    logoSize,
+    payloadBuilders,
+    payloadType,
+    scale: readNumber(value.scale, DEFAULT_STATE.scale, SCALE_MIN, SCALE_MAX),
+    transparent: readBoolean(value.transparent, DEFAULT_STATE.transparent),
+  };
+}
+
+function readConfigSettingsRecord(value: unknown): ConfigSettings | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const logoSize = readNumber(value.logoSize, DEFAULT_STATE.logoSize, LOGO_SIZE_MIN, LOGO_SIZE_MAX);
+
+  return {
+    background: readHexColor(value.background, DEFAULT_STATE.background),
+    border: readNumber(value.border, DEFAULT_STATE.border, QUIET_ZONE_MIN, QUIET_ZONE_MAX),
+    errorCorrection: readErrorCorrection(value.errorCorrection, DEFAULT_STATE.errorCorrection),
+    foreground: readHexColor(value.foreground, DEFAULT_STATE.foreground),
+    logoPaddingX: readNumber(
+      value.logoPaddingX,
+      DEFAULT_STATE.logoPaddingX,
+      LOGO_PADDING_X_MIN,
+      LOGO_PADDING_X_MAX,
+    ),
+    logoPaddingY: readNumber(
+      value.logoPaddingY,
+      DEFAULT_STATE.logoPaddingY,
+      getLogoPaddingYMin(logoSize),
+      LOGO_PADDING_Y_MAX,
+    ),
+    logoPresetId: readNullableString(value.logoPresetId),
+    logoSize,
+    scale: readNumber(value.scale, DEFAULT_STATE.scale, SCALE_MIN, SCALE_MAX),
+    transparent: readBoolean(value.transparent, DEFAULT_STATE.transparent),
+  };
 }
 
 function readPayloadBuilders(value: unknown): PayloadBuilders {
@@ -1375,6 +1528,131 @@ function decodeBase64Url(value: string): string {
   return new TextDecoder().decode(bytes);
 }
 
+function queueSettingsSave() {
+  if (settingsSaveTimer) {
+    window.clearTimeout(settingsSaveTimer);
+  }
+
+  settingsSaveTimer = window.setTimeout(() => {
+    settingsSaveTimer = 0;
+    persistSavedSettings();
+    saveCurrentConfig();
+  }, 300);
+}
+
+function persistSavedSettings() {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(toShareableSettings()));
+  } catch {
+    // localStorage can be unavailable or full; the generator should keep working.
+  }
+}
+
+function saveCurrentConfig() {
+  const settings = toConfigSettings();
+  const id = hashString(JSON.stringify(settings));
+  const entry: ConfigEntry = {
+    ...settings,
+    createdAt: Date.now(),
+    id,
+    label: createConfigLabel(settings),
+  };
+
+  configEntries = [entry, ...configEntries.filter((item) => item.id !== id)].slice(
+    0,
+    CONFIG_LIMIT,
+  );
+  persistConfigEntries();
+  renderConfigList();
+}
+
+function loadConfigEntries(): ConfigEntry[] {
+  try {
+    const stored = localStorage.getItem(CONFIGS_KEY);
+    const parsed = stored ? (JSON.parse(stored) as unknown) : [];
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map(readConfigEntry)
+      .filter((entry): entry is ConfigEntry => Boolean(entry))
+      .slice(0, CONFIG_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+function readConfigEntry(value: unknown): ConfigEntry | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const settings = readConfigSettingsRecord(value);
+
+  if (!settings) {
+    return null;
+  }
+
+  return {
+    ...settings,
+    createdAt: readNumber(value.createdAt, Date.now(), 0, Number.MAX_SAFE_INTEGER),
+    id: readString(value.id, hashString(JSON.stringify(settings))),
+    label: readString(value.label, createConfigLabel(settings)),
+  };
+}
+
+function persistConfigEntries() {
+  try {
+    localStorage.setItem(CONFIGS_KEY, JSON.stringify(configEntries));
+  } catch {
+    // localStorage can be unavailable or full; the generator should keep working.
+  }
+}
+
+function renderConfigList() {
+  elements.configCount.textContent =
+    configEntries.length === 1 ? "1 saved locally" : `${configEntries.length} saved locally`;
+  elements.configEmpty.hidden = configEntries.length > 0;
+  elements.configClear.disabled = configEntries.length === 0;
+  elements.configList.replaceChildren(...configEntries.map(createConfigEntryElement));
+}
+
+function createConfigEntryElement(entry: ConfigEntry): HTMLLIElement {
+  const item = document.createElement("li");
+  const button = document.createElement("button");
+  const row = document.createElement("span");
+  const swatches = document.createElement("span");
+  const foregroundSwatch = document.createElement("span");
+  const backgroundSwatch = document.createElement("span");
+  const label = document.createElement("span");
+  const meta = document.createElement("span");
+
+  button.className = "history-item config-item";
+  button.type = "button";
+  button.dataset.configId = entry.id;
+
+  row.className = "config-label-row";
+  swatches.className = "config-swatches";
+  foregroundSwatch.className = "config-swatch";
+  foregroundSwatch.style.backgroundColor = entry.foreground;
+  backgroundSwatch.className = "config-swatch";
+  backgroundSwatch.style.backgroundColor = entry.transparent ? "" : entry.background;
+  backgroundSwatch.dataset.transparent = String(entry.transparent);
+  label.className = "history-label";
+  label.textContent = entry.label;
+  meta.className = "history-meta";
+  meta.textContent = createConfigMeta(entry);
+
+  swatches.append(foregroundSwatch, backgroundSwatch);
+  row.append(swatches, label);
+  button.append(row, meta);
+  item.append(button);
+
+  return item;
+}
+
 function queueHistorySave() {
   if (!appState.content.trim()) {
     return;
@@ -1436,34 +1714,11 @@ function readHistoryEntry(value: unknown): HistoryEntry | null {
     return null;
   }
 
-  const payloadBuilders = readPayloadBuilders(value.payloadBuilders);
-  const payloadType = readPayloadType(value.payloadType, "raw");
-  const logoSize = readNumber(value.logoSize, DEFAULT_STATE.logoSize, LOGO_SIZE_MIN, LOGO_SIZE_MAX);
-  const settings: ShareableSettings = {
-    background: readHexColor(value.background, DEFAULT_STATE.background),
-    border: readNumber(value.border, DEFAULT_STATE.border, QUIET_ZONE_MIN, QUIET_ZONE_MAX),
-    content: readString(value.content, DEFAULT_STATE.content),
-    errorCorrection: readErrorCorrection(value.errorCorrection, DEFAULT_STATE.errorCorrection),
-    foreground: readHexColor(value.foreground, DEFAULT_STATE.foreground),
-    logoPaddingX: readNumber(
-      value.logoPaddingX,
-      DEFAULT_STATE.logoPaddingX,
-      LOGO_PADDING_X_MIN,
-      LOGO_PADDING_X_MAX,
-    ),
-    logoPaddingY: readNumber(
-      value.logoPaddingY,
-      DEFAULT_STATE.logoPaddingY,
-      getLogoPaddingYMin(logoSize),
-      LOGO_PADDING_Y_MAX,
-    ),
-    logoPresetId: readNullableString(value.logoPresetId),
-    logoSize,
-    payloadBuilders,
-    payloadType,
-    scale: readNumber(value.scale, DEFAULT_STATE.scale, SCALE_MIN, SCALE_MAX),
-    transparent: readBoolean(value.transparent, DEFAULT_STATE.transparent),
-  };
+  const settings = readSettingsRecord(value);
+
+  if (!settings) {
+    return null;
+  }
 
   return {
     ...settings,
@@ -1508,6 +1763,34 @@ function createHistoryEntryElement(entry: HistoryEntry): HTMLLIElement {
   return item;
 }
 
+function createConfigLabel(settings: ConfigSettings): string {
+  const foreground = settings.foreground.toUpperCase();
+  const background = settings.transparent ? "transparent" : settings.background.toUpperCase();
+
+  return `${foreground} on ${background}`;
+}
+
+function createConfigMeta(settings: ConfigEntry): string {
+  const parts = [
+    formatErrorCorrection(settings.errorCorrection),
+    `Quiet ${settings.border}m`,
+    `${settings.scale}px/mod`,
+  ];
+  const logo = getPresetLogo(settings.logoPresetId);
+
+  if (logo) {
+    parts.push(logo.label);
+  }
+
+  if (settings.transparent) {
+    parts.push("Transparent");
+  }
+
+  parts.push(formatHistoryTime(settings.createdAt));
+
+  return parts.join(" • ");
+}
+
 function createHistoryLabel(settings: ShareableSettings): string {
   if (settings.payloadType === "url") {
     return settings.payloadBuilders.url.value || settings.content;
@@ -1522,6 +1805,22 @@ function createHistoryLabel(settings: ShareableSettings): string {
   }
 
   return settings.content.replace(/\s+/g, " ").trim() || "Custom text";
+}
+
+function formatErrorCorrection(errorCorrection: ErrorCorrection): string {
+  if (errorCorrection === "low") {
+    return "Low EC";
+  }
+
+  if (errorCorrection === "medium") {
+    return "Medium EC";
+  }
+
+  if (errorCorrection === "quartile") {
+    return "Quartile EC";
+  }
+
+  return "High EC";
 }
 
 function formatPayloadType(type: PayloadType): string {
