@@ -948,7 +948,8 @@ input[type="file"]::file-selector-button {
 }
 
 .preview-frame svg, .preview-frame img {
-  width: 100%;
+  width: min(var(--qr-preview-size, 100%), 100%);
+  max-width: 100%;
   height: auto;
   max-height: 100%;
   border-radius: 4px;

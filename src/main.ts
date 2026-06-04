@@ -103,6 +103,10 @@ const LOGO_PADDING_Y_MAX = 8;
 const LOGO_PADDING_Y_MIN = -20;
 const LOGO_SIZE_MAX = 60;
 const LOGO_SIZE_MIN = 6;
+const QUIET_ZONE_MAX = 8;
+const QUIET_ZONE_MIN = 1;
+const SCALE_MAX = 20;
+const SCALE_MIN = 6;
 
 const DEFAULT_PAYLOAD_BUILDERS: PayloadBuilders = {
   contact: {
@@ -314,12 +318,16 @@ async function bootstrap() {
 }
 
 function configureControlRanges(state: AppState) {
+  elements.borderRange.min = String(QUIET_ZONE_MIN);
+  elements.borderRange.max = String(QUIET_ZONE_MAX);
   elements.logoPaddingXRange.min = String(LOGO_PADDING_X_MIN);
   elements.logoPaddingXRange.max = String(LOGO_PADDING_X_MAX);
   elements.logoPaddingYRange.min = String(getLogoPaddingYMin(state.logoSize));
   elements.logoPaddingYRange.max = String(LOGO_PADDING_Y_MAX);
   elements.logoSizeRange.min = String(LOGO_SIZE_MIN);
   elements.logoSizeRange.max = String(LOGO_SIZE_MAX);
+  elements.scaleRange.min = String(SCALE_MIN);
+  elements.scaleRange.max = String(SCALE_MAX);
 }
 
 function bindEvents() {
@@ -806,6 +814,7 @@ function render() {
     showError("");
     setDownloadsEnabled(true);
     elements.preview.innerHTML = svg;
+    updatePreviewQrSize(size, appState);
     bindLogoPreviewEditor();
     elements.previewShell.dataset.ready = "true";
     elements.statVersion.textContent = String(version);
@@ -817,6 +826,7 @@ function render() {
     lastResult = null;
     elements.previewShell.dataset.ready = "false";
     elements.preview.innerHTML = `<p class="placeholder-copy">Adjust the content or error correction level and try again.</p>`;
+    elements.preview.style.removeProperty("--qr-preview-size");
     elements.statVersion.textContent = "-";
     elements.statSize.textContent = "-";
     elements.statDark.textContent = "-";
@@ -828,6 +838,7 @@ function render() {
 
 function buildSvg(modules: Uint8Array, size: number, state: AppState): string {
   const totalSize = size + state.border * 2;
+  const dimension = getPixelDimension(size, state);
   let pathData = "";
 
   for (let y = 0; y < size; y += 1) {
@@ -846,7 +857,7 @@ function buildSvg(modules: Uint8Array, size: number, state: AppState): string {
   const logo = buildLogoSvg(size, state);
 
   return [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalSize} ${totalSize}" role="img" aria-label="Generated QR code">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${dimension}" height="${dimension}" viewBox="0 0 ${totalSize} ${totalSize}" role="img" aria-label="Generated QR code">`,
     background,
     `<path fill="${state.foreground}" d="${pathData}" />`,
     logo,
@@ -854,9 +865,16 @@ function buildSvg(modules: Uint8Array, size: number, state: AppState): string {
   ].join("");
 }
 
+function getPixelDimension(matrixSize: number, state: AppState): number {
+  return (matrixSize + state.border * 2) * state.scale;
+}
+
+function updatePreviewQrSize(matrixSize: number, state: AppState) {
+  elements.preview.style.setProperty("--qr-preview-size", `${getPixelDimension(matrixSize, state)}px`);
+}
+
 async function renderPngBlob(result: QrResult): Promise<Blob | null> {
-  const totalSize = result.size + appState.border * 2;
-  const dimension = totalSize * appState.scale;
+  const dimension = getPixelDimension(result.size, appState);
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
 
@@ -1200,7 +1218,7 @@ function readShareableSettings(): ShareableSettings | null {
 
     return {
       background: readHexColor(decoded.background, DEFAULT_STATE.background),
-      border: readNumber(decoded.border, DEFAULT_STATE.border, 1, 8),
+      border: readNumber(decoded.border, DEFAULT_STATE.border, QUIET_ZONE_MIN, QUIET_ZONE_MAX),
       content: readString(decoded.content, DEFAULT_STATE.content),
       errorCorrection: readErrorCorrection(decoded.errorCorrection, DEFAULT_STATE.errorCorrection),
       foreground: readHexColor(decoded.foreground, DEFAULT_STATE.foreground),
@@ -1220,7 +1238,7 @@ function readShareableSettings(): ShareableSettings | null {
       logoSize,
       payloadBuilders,
       payloadType,
-      scale: readNumber(decoded.scale, DEFAULT_STATE.scale, 6, 20),
+      scale: readNumber(decoded.scale, DEFAULT_STATE.scale, SCALE_MIN, SCALE_MAX),
       transparent: readBoolean(decoded.transparent, DEFAULT_STATE.transparent),
     };
   } catch {
@@ -1423,7 +1441,7 @@ function readHistoryEntry(value: unknown): HistoryEntry | null {
   const logoSize = readNumber(value.logoSize, DEFAULT_STATE.logoSize, LOGO_SIZE_MIN, LOGO_SIZE_MAX);
   const settings: ShareableSettings = {
     background: readHexColor(value.background, DEFAULT_STATE.background),
-    border: readNumber(value.border, DEFAULT_STATE.border, 1, 8),
+    border: readNumber(value.border, DEFAULT_STATE.border, QUIET_ZONE_MIN, QUIET_ZONE_MAX),
     content: readString(value.content, DEFAULT_STATE.content),
     errorCorrection: readErrorCorrection(value.errorCorrection, DEFAULT_STATE.errorCorrection),
     foreground: readHexColor(value.foreground, DEFAULT_STATE.foreground),
@@ -1443,7 +1461,7 @@ function readHistoryEntry(value: unknown): HistoryEntry | null {
     logoSize,
     payloadBuilders,
     payloadType,
-    scale: readNumber(value.scale, DEFAULT_STATE.scale, 6, 20),
+    scale: readNumber(value.scale, DEFAULT_STATE.scale, SCALE_MIN, SCALE_MAX),
     transparent: readBoolean(value.transparent, DEFAULT_STATE.transparent),
   };
 
@@ -1689,7 +1707,7 @@ function getPayloadSafetyItem(version: number): ScanSafetyItem {
 function getDensitySafetyItem(): ScanSafetyItem {
   if (appState.scale >= 10) {
     return {
-      detail: `${appState.scale} pixels per module for PNG export.`,
+      detail: `${appState.scale} pixels per module for preview and export.`,
       label: `${appState.scale}px/mod`,
       status: "good",
     };
@@ -1697,14 +1715,14 @@ function getDensitySafetyItem(): ScanSafetyItem {
 
   if (appState.scale >= 8) {
     return {
-      detail: `${appState.scale} pixels per module for PNG export.`,
+      detail: `${appState.scale} pixels per module for preview and export.`,
       label: `${appState.scale}px/mod`,
       status: "notice",
     };
   }
 
   return {
-    detail: `${appState.scale} pixels per module for PNG export.`,
+    detail: `${appState.scale} pixels per module for preview and export.`,
     label: `${appState.scale}px/mod`,
     status: "warning",
   };
