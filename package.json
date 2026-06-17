@@ -4,11 +4,15 @@
   "private": true,
   "description": "A fully static QR code generator powered by Rust WebAssembly and Vite.",
   "type": "module",
+  "bin": {
+    "qr": "bin/qr.ts"
+  },
   "scripts": {
     "dev": "npm run wasm:dev && vite",
     "build": "npm run wasm && vite build",
     "preview": "vite preview",
     "check": "npm run wasm:dev && tsc --noEmit",
+    "qr": "node bin/qr.ts",
     "wasm": "rm -rf src/wasm/pkg && wasm-pack build wasm/qr-engine --target web --out-dir ../../src/wasm/pkg --release",
     "wasm:dev": "rm -rf src/wasm/pkg && wasm-pack build wasm/qr-engine --target web --out-dir ../../src/wasm/pkg --dev"
   },
