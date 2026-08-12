@@ -64,6 +64,7 @@ export const RENDER_DEFAULTS = {
 // from these entries; the CLI resolves them to files on disk.
 export const PRESET_LOGOS: { id: string; label: string; file: string }[] = [
   { id: "github", label: "GitHub", file: "github.svg" },
+  { id: "hf", label: "Hugging Face", file: "hf.svg" },
   { id: "arxiv", label: "arXiv", file: "arxiv.svg" },
   { id: "pypi", label: "PyPI", file: "pypi.svg" },
   { id: "qwen", label: "Qwen", file: "qwen.svg" },
